@@ -1,0 +1,13 @@
+[package]
+name = "shogi_mate_solver"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+shogi_core = "0.1"
+shogi_usi_parser = "0.1"
+shogi_official_kifu = "0.1"
+
+[patch.crates-io]
+shogi_official_kifu = { path = "../shogi_official_kifu/shogi_official_kifu" }
+shogi_legality_lite = { git = "https://github.com/rust-shogi-crates/shogi_legality_lite" }
