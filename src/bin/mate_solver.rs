@@ -16,6 +16,7 @@ enum Output {
 enum MoveFormat {
     Usi,
     Kif,
+    Csa,
     Official,
     Traditional,
 }
@@ -31,7 +32,7 @@ fn parse_args() -> Opts {
     let mut opts = Opts {
         verbose: false,
         output: Output::Text,
-        move_format: MoveFormat::Usi,
+        move_format: MoveFormat::Traditional,
     };
     for a in args {
         if a == "--verbose" {
@@ -39,6 +40,16 @@ fn parse_args() -> Opts {
         }
         if a == "--output=json" {
             opts.output = Output::Json;
+        }
+        if let Some(rest) = a.strip_prefix("--move-format=") {
+            opts.move_format = match rest {
+                "kif" => MoveFormat::Kif,
+                "usi" => MoveFormat::Usi,
+                "csa" => MoveFormat::Csa,
+                "official" => MoveFormat::Official,
+                "traditional" => MoveFormat::Traditional,
+                _ => panic!(),
+            };
         }
     }
     opts
@@ -94,11 +105,19 @@ go
     let answer = Position::from_usi(&sfen_moves).unwrap();
     let moves = answer.moves();
     for (index, &mv) in moves.iter().enumerate() {
-        println!(
-            "{:2}: {}",
-            index + 1,
-            shogi_official_kifu::display_single_move_kansuji(&position, mv).unwrap()
-        );
+        match opts.move_format {
+            MoveFormat::Official => println!(
+                "{:2}: {}",
+                index + 1,
+                shogi_official_kifu::display_single_move(&position, mv).unwrap()
+            ),
+            MoveFormat::Traditional => println!(
+                "{:2}: {}",
+                index + 1,
+                shogi_official_kifu::display_single_move_kansuji(&position, mv).unwrap()
+            ),
+            _ => todo!(),
+        }
         position.make_move(mv).unwrap();
     }
     writeln!(stdin, "quit").unwrap();

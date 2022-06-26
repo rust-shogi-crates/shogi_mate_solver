@@ -10,7 +10,7 @@ pub enum RecordType {
 }
 
 pub fn check_record_type(a: &str) -> RecordType {
-    if a.starts_with("#KIF version=") {
+    if a.starts_with("#KIF version=") || a.starts_with("# --- Kifu for Windows") {
         return RecordType::Kif;
     }
     RecordType::Psn
@@ -18,11 +18,7 @@ pub fn check_record_type(a: &str) -> RecordType {
 
 pub fn parse(a: &str, record_type: RecordType) -> PartialPosition {
     match record_type {
-        RecordType::Kif => parse_kif(a),
+        RecordType::Kif => kif::parse_kif(a),
         _ => todo!(),
     }
-}
-
-pub fn parse_kif(a: &str) -> PartialPosition {
-    todo!();
 }

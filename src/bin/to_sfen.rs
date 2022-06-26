@@ -31,7 +31,6 @@ fn fetch_problem(url: &str, opts: &Opts) -> String {
 
 fn main() {
     let opts = Opts {
-        verbose: true,
         ..Default::default()
     };
     let args: Vec<_> = args().collect();
@@ -47,5 +46,9 @@ fn main() {
         eprintln!("data = {}", data);
     }
     let record_type = shogi_mate_solver::check_record_type(&data);
-    eprintln!("record_type = {:?}", record_type);
+    if opts.verbose {
+        eprintln!("record_type = {:?}", record_type);
+    }
+    let position = shogi_mate_solver::parse(&data, record_type);
+    println!("{}", position.to_sfen_owned());
 }
