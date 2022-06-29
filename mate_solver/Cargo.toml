@@ -1,0 +1,9 @@
+[package]
+name = "mate_solver"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+shogi_legality_lite = "0.1.1"
+shogi_core = "0.1.4"

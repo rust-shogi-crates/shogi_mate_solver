@@ -106,6 +106,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mate_solver"
+version = "0.1.0"
+dependencies = [
+ "shogi_core",
+ "shogi_legality_lite",
+]
+
+[[package]]
 name = "native-tls"
 version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -269,6 +277,7 @@ name = "shogi_mate_solver"
 version = "0.1.0"
 dependencies = [
  "encoding_rs",
+ "mate_solver",
  "shogi_core",
  "shogi_official_kifu",
  "shogi_usi_parser",
