@@ -1,7 +1,7 @@
 use std::mem::MaybeUninit;
 
 /// 置換表。
-struct Tt<V> {
+pub struct Tt<V> {
     pub present: Vec<u64>,
     pub table: Vec<MaybeUninit<(u64, V)>>,
 }

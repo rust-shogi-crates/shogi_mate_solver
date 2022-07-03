@@ -1,5 +1,5 @@
 use once_cell::sync::Lazy;
-use shogi_core::{Color, Hand, Move, PartialPosition, PieceKind, Square};
+use shogi_core::{Color, Hand, Move, PartialPosition, Piece, PieceKind, Square};
 
 type Key = u64;
 
@@ -8,6 +8,7 @@ pub struct PositionWrapper {
     hash: Key,
 }
 impl PositionWrapper {
+    #[inline]
     pub fn new(position: PartialPosition) -> Self {
         let hash = Self::compute_hash(&position);
         Self {
@@ -17,26 +18,74 @@ impl PositionWrapper {
     }
 
     /// 攻め方の王手の一覧。
+    #[inline(always)]
     pub fn all_checks(&self) -> Vec<Move> {
         shogi_legality_lite::all_checks_partial(&self.inner)
     }
 
     /// 玉方の手の一覧。
+    #[inline(always)]
     pub fn all_evasions(&self) -> Vec<Move> {
         shogi_legality_lite::all_legal_moves_partial(&self.inner)
     }
 
     /// 局面のハッシュ値。この値は衝突してはならない。
+    #[inline(always)]
     pub fn zobrist_hash(&self) -> u64 {
         self.hash
     }
 
     /// 手を指す。ハッシュ値も更新する。
     pub fn make_move(&mut self, mv: Move) {
+        let mut diff = 0;
+        if let Move::Normal { to, .. } = mv {
+            let original = self.inner.piece_at(to);
+            if let Some(original) = original {
+                let (piece_kind, color) = original.to_parts();
+                diff = TABLE.board[to.array_index()][color.array_index()][piece_kind.array_index()];
+                let unpromoted = if let Some(x) = piece_kind.unpromote() {
+                    x
+                } else {
+                    piece_kind
+                };
+                let num = self
+                    .inner
+                    .hand(Piece::new(unpromoted, color.flip()))
+                    .unwrap();
+                diff ^=
+                    TABLE.hands[1 - color.array_index()][unpromoted.array_index()][num as usize];
+            }
+        }
         if self.inner.make_move(mv).is_some() {
-            // TODO: differential update
-            let hash = Self::compute_hash(&self.inner);
-            self.hash = hash;
+            match mv {
+                Move::Normal { from, to, promote } => {
+                    let piece = self.inner.piece_at(to);
+                    if let Some(piece) = piece {
+                        let (piece_kind, color) = piece.to_parts();
+                        let before = if promote {
+                            piece_kind.unpromote().unwrap()
+                        } else {
+                            piece_kind
+                        };
+                        diff ^= TABLE.board[to.array_index()][color.array_index()]
+                            [piece_kind.array_index()];
+                        diff ^= TABLE.board[from.array_index()][color.array_index()]
+                            [before.array_index()];
+                    }
+                }
+                Move::Drop { piece, to } => {
+                    let (piece_kind, color) = piece.to_parts();
+                    // 盤上の差分
+                    diff ^= TABLE.board[to.array_index()][color.array_index()]
+                        [piece_kind.array_index()];
+                    // 持ち駒の差分
+                    let now = self.inner.hand(piece).unwrap();
+                    diff ^=
+                        TABLE.hands[color.array_index()][piece_kind.array_index()][now as usize];
+                }
+            }
+            diff ^= COLOR_HASH;
+            self.hash ^= diff;
         }
     }
 
@@ -102,7 +151,6 @@ const COLOR_HASH: Key = 1;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shogi_core::Piece;
 
     #[test]
     fn empty_hash() {
