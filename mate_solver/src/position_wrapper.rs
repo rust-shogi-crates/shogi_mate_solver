@@ -36,6 +36,11 @@ impl PositionWrapper {
         self.hash
     }
 
+    #[inline(always)]
+    pub fn inner(&self) -> &PartialPosition {
+        &self.inner
+    }
+
     /// 手を指す。ハッシュ値も更新する。
     pub fn make_move(&mut self, mv: Move) {
         let mut diff = 0;
@@ -121,7 +126,7 @@ impl PositionWrapper {
 
 struct ZobristTable {
     board: [[[u64; PieceKind::NUM]; Color::NUM]; Square::NUM],
-    hands: [[[u64; 18]; Hand::NUM_HAND_PIECES]; 2],
+    hands: [[[u64; 18]; Hand::NUM_HAND_PIECES]; Color::NUM],
 }
 
 static TABLE: Lazy<ZobristTable> = Lazy::new(|| {

@@ -125,6 +125,7 @@ dependencies = [
  "rand_chacha",
  "shogi_core",
  "shogi_legality_lite",
+ "shogi_usi_parser",
 ]
 
 [[package]]

@@ -45,4 +45,4 @@ impl<V: Copy> Tt<V> {
 pub type DfPnTable = Tt<(u32, u32)>;
 
 /// 最短手順探索用の置換表。
-pub type EvalTable = Tt<crate::eval::value::Value>;
+pub type EvalTable = Tt<(crate::eval::value::Value, Option<shogi_core::Move>)>;

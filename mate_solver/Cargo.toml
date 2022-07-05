@@ -10,3 +10,6 @@ shogi_legality_lite = "0.1.1"
 shogi_core = "0.1.4"
 rand = "0.8"
 rand_chacha = "0.3"
+
+[dev-dependencies]
+shogi_usi_parser = "0.1"
