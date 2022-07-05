@@ -3,6 +3,7 @@ use shogi_core::{Color, Hand, Move, PartialPosition, Piece, PieceKind, Square};
 
 type Key = u64;
 
+#[derive(Clone, Debug)]
 pub struct PositionWrapper {
     inner: PartialPosition,
     hash: Key,
@@ -236,6 +237,10 @@ mod tests {
         for i in 0..8 {
             position.make_move(moves[i]);
             hashes[i + 1] = position.zobrist_hash();
+            assert_eq!(
+                position.zobrist_hash(),
+                PositionWrapper::compute_hash(&position.inner)
+            );
         }
         assert_eq!(hashes[2], hashes[8]);
     }
