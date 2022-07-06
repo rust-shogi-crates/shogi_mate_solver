@@ -1,7 +1,8 @@
 use shogi_core::{Hand, Move, PartialPosition, Piece, ToUsi};
+use std::collections::BTreeSet;
 
 use crate::{
-    position_wrapper::PositionWrapper,
+    position_wrapper::{Key, PositionWrapper},
     tt::{DfPnTable, EvalTable},
 };
 
@@ -15,6 +16,7 @@ pub fn search(position: &PartialPosition, df_pn: &DfPnTable, evals: &mut EvalTab
         evals,
         Value::ZERO,
         Value::new(12, 0, 0),
+        &mut BTreeSet::new(),
     )
     .0
 }
@@ -26,6 +28,7 @@ pub fn alpha_beta_me(
     evals: &mut EvalTable,
     alpha: Value,
     mut beta: Value,
+    seen: &mut BTreeSet<Key>,
 ) -> (Value, Option<Move>) {
     if beta.plies() == 0 {
         // 0 手で詰ますことはできない。攻め方にとって最悪の評価値を返す。
@@ -60,21 +63,29 @@ pub fn alpha_beta_me(
         evals.insert(position.zobrist_hash(), (Value::INF, None));
         return (Value::INF, None);
     }
+
+    if seen.contains(&position.zobrist_hash()) {
+        return (Value::INF, None);
+    }
+    seen.insert(position.zobrist_hash());
+
     let mut best = None;
     for mv in all {
         let mut next = position.clone();
         next.make_move(mv);
-        let eval = alpha_beta_you(&next, df_pn, evals, new_alpha, new_beta).0;
+        let eval = alpha_beta_you(&next, df_pn, evals, new_alpha, new_beta, seen).0;
         let eval = eval.plies_added_unchecked(1);
         if eval <= beta {
             best = Some(mv);
             beta = eval
         }
         if alpha >= beta {
+            seen.remove(&position.zobrist_hash());
             return (beta, best);
         }
     }
     evals.insert(position.zobrist_hash(), (beta, best));
+    seen.remove(&position.zobrist_hash());
     (beta, best)
 }
 
@@ -85,6 +96,7 @@ pub fn alpha_beta_you(
     evals: &mut EvalTable,
     mut alpha: Value,
     beta: Value,
+    seen: &mut BTreeSet<Key>,
 ) -> (Value, Option<Move>) {
     if alpha >= beta {
         return (alpha, None);
@@ -126,21 +138,29 @@ pub fn alpha_beta_you(
         alpha,
         beta
     );
+
+    if seen.contains(&position.zobrist_hash()) {
+        return (Value::INF, None);
+    }
+    seen.insert(position.zobrist_hash());
+
     let mut best = None;
     for &mv in &all {
         let mut next = position.clone();
         next.make_move(mv);
-        let eval = alpha_beta_me(&next, df_pn, evals, new_alpha, new_beta).0;
+        let eval = alpha_beta_me(&next, df_pn, evals, new_alpha, new_beta, seen).0;
         let eval = eval.plies_added_unchecked(1);
         if eval >= alpha {
             best = Some(mv);
             alpha = eval;
         }
         if alpha >= beta {
+            seen.remove(&position.zobrist_hash());
             return (alpha, best);
         }
     }
     evals.insert(position.zobrist_hash(), (alpha, best));
+    seen.remove(&position.zobrist_hash());
     (alpha, best)
 }
 
@@ -160,9 +180,23 @@ mod tests {
         let mut result = Vec::new();
         loop {
             let (_value, mv) = if turn % 2 == 0 {
-                alpha_beta_me(&position, df_pn, evals, Value::ZERO, beta)
+                alpha_beta_me(
+                    &position,
+                    df_pn,
+                    evals,
+                    Value::ZERO,
+                    beta,
+                    &mut BTreeSet::new(),
+                )
             } else {
-                alpha_beta_you(&position, df_pn, evals, Value::ZERO, beta)
+                alpha_beta_you(
+                    &position,
+                    df_pn,
+                    evals,
+                    Value::ZERO,
+                    beta,
+                    &mut BTreeSet::new(),
+                )
             };
             if let Some(mv) = mv {
                 result.push(mv);
@@ -189,10 +223,11 @@ mod tests {
         let result = search(&position, &df_pn, &mut eval);
         eprintln!("result = {:?}", result);
         let sequence = find_mate_sequence(&df_pn, &mut eval, &position, result);
-        for mv in sequence {
+        for &mv in &sequence {
             eprintln!("{}", mv.to_usi_owned());
             position.make_move(mv).unwrap();
         }
+        assert_eq!(sequence.len(), 5);
     }
 
     #[test]
@@ -209,9 +244,34 @@ mod tests {
         let result = search(&position, &df_pn, &mut eval);
         eprintln!("result = {:?}", result);
         let sequence = find_mate_sequence(&df_pn, &mut eval, &position, result);
-        for mv in sequence {
+        for &mv in &sequence {
             eprintln!("{}", mv.to_usi_owned());
             position.make_move(mv).unwrap();
         }
+        assert_eq!(sequence.len(), 9);
+    }
+
+    #[test]
+    fn solve_mate_problem_works_3() {
+        use shogi_usi_parser::FromUsi;
+
+        // From https://github.com/koba-e964/shogi-mate-problems/blob/d58d61336dd82096856bc3ac0ba372e5cd722bc8/2022-05-18/mate9.psn#L3
+        let mut position = PartialPosition::from_usi("sfen 7kl/9/6G1p/9/9/9/9/9/9 b S 1").unwrap();
+
+        let df_pn = DfPnTable::new(1 << 15);
+        let mut eval = EvalTable::new(1 << 15);
+        let result = search(&position, &df_pn, &mut eval);
+        eprintln!("result = {:?}", result);
+        let sequence = find_mate_sequence(&df_pn, &mut eval, &position, result);
+        let expected = [
+            "S*3b", // 32銀
+            "2a1b", // 12玉
+            "3c2c", // 23金
+        ];
+        for (index, &mv) in sequence.iter().enumerate() {
+            assert_eq!(mv.to_usi_owned(), expected[index]);
+            position.make_move(mv).unwrap();
+        }
+        assert_eq!(sequence.len(), 3);
     }
 }

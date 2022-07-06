@@ -1,7 +1,7 @@
 use once_cell::sync::Lazy;
 use shogi_core::{Color, Hand, Move, PartialPosition, Piece, PieceKind, Square};
 
-type Key = u64;
+pub type Key = u64;
 
 #[derive(Clone, Debug)]
 pub struct PositionWrapper {
