@@ -17,11 +17,11 @@ impl<V: Copy> Tt<V> {
         }
     }
     #[inline(always)]
-    pub fn len(&self) -> usize {
+    pub fn size(&self) -> usize {
         self.table.len()
     }
     pub fn fetch(&self, key: u64) -> Option<V> {
-        let len = self.len();
+        let len = self.size();
         let index = key % len as u64;
         if (self.present[index as usize / 8] & 1 << (index % 8)) == 0 {
             return None;
@@ -34,7 +34,7 @@ impl<V: Copy> Tt<V> {
         }
     }
     pub fn insert(&mut self, key: u64, value: V) {
-        let len = self.len();
+        let len = self.size();
         let index = key % len as u64;
         self.present[index as usize / 8] |= 1 << (index % 8);
         self.table[index as usize].write((key, value));

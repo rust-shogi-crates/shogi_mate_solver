@@ -67,14 +67,14 @@ fn parse_hand(a: &str) -> Hand {
 
 pub fn parse_kif(a: &str) -> PartialPosition {
     let mut position = PartialPosition::empty();
-    for line in a.split("\n") {
+    for line in a.split('\n') {
         if let Some(rest) = line.strip_prefix("先手の持駒：") {
             *position.hand_of_a_player_mut(Color::Black) = parse_hand(rest);
         }
         if let Some(rest) = line.strip_prefix("後手の持駒：") {
             *position.hand_of_a_player_mut(Color::White) = parse_hand(rest);
         }
-        if let Some(rest) = line.strip_prefix("|") {
+        if let Some(rest) = line.strip_prefix('|') {
             let mut v = Vec::new();
             let mut color = Color::Black;
             for c in rest.chars() {
