@@ -181,12 +181,11 @@ fn main() {
         eprintln!("! sfen = {}", sfen.trim());
     }
     let mut position = PartialPosition::from_usi(&("sfen ".to_string() + sfen.trim())).unwrap();
-    let moves;
-    if let Some(ref exec_path) = opts.engine_path {
-        moves = invoke_external_engine(&position, exec_path, &opts);
+    let moves = if let Some(ref exec_path) = opts.engine_path {
+        invoke_external_engine(&position, exec_path, &opts)
     } else {
-        moves = solve_myself(&position, &opts);
-    }
+        solve_myself(&position, &opts)
+    };
     if let Some(moves) = moves {
         let mut first = true;
         if opts.output == Output::Json {
