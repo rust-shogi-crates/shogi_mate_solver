@@ -1,11 +1,16 @@
 use std::{
+    collections::BTreeSet,
     env::args,
     io::Write,
     io::{stdin, BufRead, BufReader},
     process::{Command, Stdio},
 };
 
-use shogi_core::{PartialPosition, Position};
+use mate_solver::eval::search::{alpha_beta_me, alpha_beta_you, search};
+use mate_solver::eval::Value;
+use mate_solver::position_wrapper::PositionWrapper;
+use mate_solver::tt::{DfPnTable, EvalTable};
+use shogi_core::{Move, PartialPosition, Position};
 use shogi_usi_parser::FromUsi;
 
 enum Output {
@@ -25,6 +30,7 @@ struct Opts {
     verbose: bool,
     output: Output,
     move_format: MoveFormat,
+    engine_path: Option<String>,
 }
 
 fn parse_args() -> Opts {
@@ -33,6 +39,7 @@ fn parse_args() -> Opts {
         verbose: false,
         output: Output::Text,
         move_format: MoveFormat::Traditional,
+        engine_path: None,
     };
     for a in args {
         if a == "--verbose" {
@@ -51,20 +58,19 @@ fn parse_args() -> Opts {
                 _ => panic!(),
             };
         }
+        if let Some(rest) = a.strip_prefix("--engine-path=") {
+            opts.engine_path = Some(rest.to_owned());
+        }
     }
     opts
 }
 
-// Take an SFEN string from stdin, and solves the problem.
-fn main() {
-    let opts = parse_args();
-    let mut sfen = String::new();
-    stdin().read_line(&mut sfen).unwrap();
-    if opts.verbose {
-        eprintln!("! sfen = {}", sfen);
-    }
-    let mut position = PartialPosition::from_usi(&("sfen ".to_string() + sfen.trim())).unwrap();
-    let exec_path = "../YaneuraOu/source/YaneuraOu-by-gcc";
+fn invoke_external_engine(
+    position: &PartialPosition,
+    exec_path: &str,
+    opts: &Opts,
+) -> Option<Vec<Move>> {
+    let sfen = position.to_sfen_owned();
     let s = format!(
         "setoption name USI_Hash value 128
 isready
@@ -98,27 +104,106 @@ go
         }
     }
     if mate_sequence == "nomate" {
-        println!("nomate");
-        return;
+        return None;
     }
+    // Get moves from mate_sequence
     let sfen_moves = "sfen ".to_string() + sfen.trim() + " moves " + &mate_sequence;
     let answer = Position::from_usi(&sfen_moves).unwrap();
     let moves = answer.moves();
-    for (index, &mv) in moves.iter().enumerate() {
-        match opts.move_format {
-            MoveFormat::Official => println!(
-                "{:2}: {}",
-                index + 1,
-                shogi_official_kifu::display_single_move(&position, mv).unwrap()
-            ),
-            MoveFormat::Traditional => println!(
-                "{:2}: {}",
-                index + 1,
-                shogi_official_kifu::display_single_move_kansuji(&position, mv).unwrap()
-            ),
-            _ => todo!(),
-        }
-        position.make_move(mv).unwrap();
-    }
     writeln!(stdin, "quit").unwrap();
+    Some(moves.to_vec())
+}
+
+fn find_mate_sequence(
+    df_pn: &DfPnTable,
+    evals: &mut EvalTable,
+    position: &PartialPosition,
+    opt: Value,
+) -> Vec<Move> {
+    let mut turn = 0;
+    let mut beta = opt.plies_added_unchecked(1);
+    let mut position = PositionWrapper::new(position.clone());
+    let mut result = Vec::new();
+    loop {
+        let (_value, mv) = if turn % 2 == 0 {
+            alpha_beta_me(
+                &position,
+                df_pn,
+                evals,
+                Value::ZERO,
+                beta,
+                &mut BTreeSet::new(),
+            )
+        } else {
+            alpha_beta_you(
+                &position,
+                df_pn,
+                evals,
+                Value::ZERO,
+                beta,
+                &mut BTreeSet::new(),
+            )
+        };
+        if let Some(mv) = mv {
+            result.push(mv);
+            position.make_move(mv);
+        } else {
+            return result;
+        }
+        turn += 1;
+        beta = beta.plies_added_unchecked(-1);
+    }
+}
+
+fn solve_myself(position: &PartialPosition, opts: &Opts) -> Option<Vec<Move>> {
+    let size = 1 << 15;
+
+    let df_pn = DfPnTable::new(size);
+    let mut eval = EvalTable::new(size);
+    let result = search(position, &df_pn, &mut eval);
+    if opts.verbose {
+        eprintln!("result = {:?}", result);
+    }
+    if !result.is_mate() {
+        return None;
+    }
+    let sequence = find_mate_sequence(&df_pn, &mut eval, position, result);
+    Some(sequence)
+}
+
+// Take an SFEN string from stdin, and solves the problem.
+fn main() {
+    let opts = parse_args();
+    let mut sfen = String::new();
+    stdin().read_line(&mut sfen).unwrap();
+    if opts.verbose {
+        eprintln!("! sfen = {}", sfen.trim());
+    }
+    let mut position = PartialPosition::from_usi(&("sfen ".to_string() + sfen.trim())).unwrap();
+    let moves;
+    if let Some(ref exec_path) = opts.engine_path {
+        moves = invoke_external_engine(&position, exec_path, &opts);
+    } else {
+        moves = solve_myself(&position, &opts);
+    }
+    if let Some(moves) = moves {
+        for (index, &mv) in moves.iter().enumerate() {
+            match opts.move_format {
+                MoveFormat::Official => println!(
+                    "{:2}: {}",
+                    index + 1,
+                    shogi_official_kifu::display_single_move(&position, mv).unwrap()
+                ),
+                MoveFormat::Traditional => println!(
+                    "{:2}: {}",
+                    index + 1,
+                    shogi_official_kifu::display_single_move_kansuji(&position, mv).unwrap()
+                ),
+                _ => todo!(),
+            }
+            position.make_move(mv).unwrap();
+        }
+    } else {
+        println!("nomate");
+    }
 }

@@ -16,6 +16,11 @@ impl Value {
         Self(plies << 20 | (0xff - pieces) << 12 | (0xfff - futile))
     }
 
+    /// 詰みかどうかを返す。
+    pub fn is_mate(self) -> bool {
+        self.0 < Self::PLY_MASK
+    }
+
     #[inline(always)]
     pub fn plies(self) -> u32 {
         self.0 >> 20
