@@ -10,9 +10,10 @@ use mate_solver::eval::search::{alpha_beta_me, alpha_beta_you, search};
 use mate_solver::eval::Value;
 use mate_solver::position_wrapper::PositionWrapper;
 use mate_solver::tt::{DfPnTable, EvalTable};
-use shogi_core::{Move, PartialPosition, Position};
+use shogi_core::{Move, PartialPosition, Position, ToUsi};
 use shogi_usi_parser::FromUsi;
 
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
 enum Output {
     Text,
     Json,
@@ -162,7 +163,7 @@ fn solve_myself(position: &PartialPosition, opts: &Opts) -> Option<Vec<Move>> {
     let mut eval = EvalTable::new(size);
     let result = search(position, &df_pn, &mut eval);
     if opts.verbose {
-        eprintln!("result = {:?}", result);
+        eprintln!("! result = {:?}", result);
     }
     if !result.is_mate() {
         return None;
@@ -187,21 +188,32 @@ fn main() {
         moves = solve_myself(&position, &opts);
     }
     if let Some(moves) = moves {
+        let mut first = true;
+        if opts.output == Output::Json {
+            print!("[");
+        }
         for (index, &mv) in moves.iter().enumerate() {
-            match opts.move_format {
-                MoveFormat::Official => println!(
-                    "{:2}: {}",
-                    index + 1,
+            let move_str = match opts.move_format {
+                MoveFormat::Usi => mv.to_usi_owned(),
+                MoveFormat::Official => {
                     shogi_official_kifu::display_single_move(&position, mv).unwrap()
-                ),
-                MoveFormat::Traditional => println!(
-                    "{:2}: {}",
-                    index + 1,
+                }
+                MoveFormat::Traditional => {
                     shogi_official_kifu::display_single_move_kansuji(&position, mv).unwrap()
-                ),
+                }
                 _ => todo!(),
+            };
+            match opts.output {
+                Output::Text => println!("{:2}: {}", index + 1, move_str),
+                Output::Json => {
+                    print!("{}{:?}", if first { "" } else { "," }, move_str);
+                    first = false;
+                }
             }
             position.make_move(mv).unwrap();
+        }
+        if opts.output == Output::Json {
+            println!("]");
         }
     } else {
         println!("nomate");
