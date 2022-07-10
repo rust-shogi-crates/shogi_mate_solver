@@ -22,6 +22,32 @@ impl NodeKind {
     }
 }
 
+#[derive(Clone, Default)]
+struct SearchCtx {
+    seq: Vec<Move>,
+}
+
+impl SearchCtx {
+    fn push(&mut self, mv: Move) {
+        self.seq.push(mv);
+    }
+    fn pop(&mut self) {
+        self.seq.pop();
+    }
+}
+
+impl core::fmt::Debug for SearchCtx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use shogi_core::ToUsi;
+
+        write!(f, "[")?;
+        for &mv in &self.seq {
+            write!(f, " {}", mv.to_usi_owned())?;
+        }
+        write!(f, "]")
+    }
+}
+
 // ルートでの反復深化
 pub fn df_pn(dfpn_tbl: &mut DfPnTable, position: &PositionWrapper) -> (u32, u32) {
     let (phi_now, delta_now) = mid(
@@ -29,10 +55,19 @@ pub fn df_pn(dfpn_tbl: &mut DfPnTable, position: &PositionWrapper) -> (u32, u32)
         position,
         (u32::MAX - 1, u32::MAX - 1),
         NodeKind::Or,
+        &mut Default::default(),
     );
     // ループを見つけてしまった
     if phi_now != u32::MAX && delta_now != u32::MAX {
-        return mid(dfpn_tbl, position, (u32::MAX, u32::MAX), NodeKind::Or);
+        eprintln!("! loop found: {} {}", phi_now, delta_now);
+        dfpn_tbl.clear();
+        return mid(
+            dfpn_tbl,
+            position,
+            (u32::MAX, u32::MAX),
+            NodeKind::Or,
+            &mut Default::default(),
+        );
     }
     (phi_now, delta_now)
 }
@@ -44,11 +79,23 @@ fn mid(
     position: &PositionWrapper,
     (mut phi_now, mut delta_now): (u32, u32),
     node_kind: NodeKind,
+    ctx: &mut SearchCtx,
 ) -> (u32, u32) {
+    if ctx.seq.len() >= 50 {
+        panic!();
+    }
     let (phi, delta) = look_up_hash(dfpn_tbl, position.zobrist_hash());
     if phi_now <= phi || delta_now <= delta {
+        eprintln!(
+            "cut  : {:?} {} {} (hash = {} {})",
+            ctx, phi_now, delta_now, phi, delta
+        );
         return (phi, delta);
     }
+    eprintln!(
+        "start: {:?} {} {} (hash = {} {})",
+        ctx, phi_now, delta_now, phi, delta
+    );
     let moves = match node_kind {
         NodeKind::Or => position.all_checks(),
         NodeKind::And => position.all_evasions(),
@@ -67,13 +114,18 @@ fn mid(
     put_in_hash(dfpn_tbl, position.zobrist_hash(), (phi_now, delta_now));
     // 4. 多重反復深化
     loop {
-        let delta_min = delta_min(dfpn_tbl, &children);
         let phi_sum = phi_sum(dfpn_tbl, &children);
+        let delta_min = if phi_sum >= u32::MAX - 1 {
+            0
+        } else {
+            delta_min(dfpn_tbl, &children)
+        };
         // φ か δ がそのしきい値以上なら探索終了
         if phi_now <= delta_min || delta_now <= phi_sum {
             phi_now = delta_min;
             delta_now = phi_sum;
             put_in_hash(dfpn_tbl, position.zobrist_hash(), (phi_now, delta_now));
+            eprintln!("end  : {:?} hash = {} {}", ctx, phi_now, delta_now);
             return (phi_now, delta_now);
         }
         let ((mv, _n_c, phi_c, delta_c), delta_2) = select_child(dfpn_tbl, &children);
@@ -92,7 +144,9 @@ fn mid(
         };
         let mut next = position.clone();
         next.make_move(mv);
-        mid(dfpn_tbl, &next, (phi_n_c, delta_n_c), node_kind.flip());
+        ctx.push(mv);
+        mid(dfpn_tbl, &next, (phi_n_c, delta_n_c), node_kind.flip(), ctx);
+        ctx.pop();
     }
 }
 
@@ -120,6 +174,9 @@ fn select_child(dfpn_tbl: &DfPnTable, children: &[(Move, Key)]) -> ((Move, Key, 
             delta_c = delta;
         } else if delta < delta_2 {
             delta_2 = delta;
+        }
+        if phi == u32::MAX {
+            return ((n_best.0, n_best.1, phi_c, delta_c), delta_2);
         }
     }
     ((n_best.0, n_best.1, phi_c, delta_c), delta_2)
@@ -219,5 +276,50 @@ mod tests {
         let result = df_pn(&mut dfpn_tbl, &tmp);
         // 不詰
         assert_eq!(result, (u32::MAX, 0));
+    }
+
+    #[test]
+    fn solve_mate_problem_works_1() {
+        use shogi_usi_parser::FromUsi;
+
+        // From https://github.com/koba-e964/shogi-mate-problems/blob/d58d61336dd82096856bc3ac0ba372e5cd722bc8/2022-05-18/mate9.psn#L3
+        let position =
+            PartialPosition::from_usi("sfen 5kgnl/9/4+B1pp1/8p/9/9/9/9/9 b 2S2rb3g2s3n3l15p 1")
+                .unwrap();
+        let wrapped = PositionWrapper::new(position.clone());
+
+        let mut dfpn_tbl = DfPnTable::new(1 << 20);
+        let result = df_pn(&mut dfpn_tbl, &wrapped);
+        // 詰み
+        assert_eq!(result, (0, u32::MAX));
+    }
+
+    #[test]
+    fn solve_mate_problem_works_2() {
+        use shogi_usi_parser::FromUsi;
+
+        // From https://github.com/koba-e964/shogi-mate-problems/blob/d58d61336dd82096856bc3ac0ba372e5cd722bc8/2022-05-19/dpm.psn#L3
+        let position =
+            PartialPosition::from_usi("sfen 7nk/9/6PB1/6NP1/9/9/9/9/9 b P2rb4g4s2n4l15p 1")
+                .unwrap();
+        let wrapped = PositionWrapper::new(position.clone());
+
+        let mut dfpn_tbl = DfPnTable::new(1 << 20);
+        let result = df_pn(&mut dfpn_tbl, &wrapped);
+        // 詰み
+        assert_eq!(result, (0, u32::MAX));
+    }
+
+    #[test]
+    fn solve_mate_problem_works_3() {
+        use shogi_usi_parser::FromUsi;
+
+        let position = PartialPosition::from_usi("sfen 7kl/9/6G1p/9/9/9/9/9/9 b S 1").unwrap();
+        let wrapped = PositionWrapper::new(position.clone());
+
+        let mut dfpn_tbl = DfPnTable::new(1 << 20);
+        let result = df_pn(&mut dfpn_tbl, &wrapped);
+        // 詰み
+        assert_eq!(result, (0, u32::MAX));
     }
 }

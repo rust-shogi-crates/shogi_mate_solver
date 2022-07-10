@@ -39,6 +39,12 @@ impl<V: Copy> Tt<V> {
         self.present[index as usize / 8] |= 1 << (index % 8);
         self.table[index as usize].write((key, value));
     }
+
+    pub fn clear(&mut self) {
+        for v in &mut self.present {
+            *v = 0;
+        }
+    }
 }
 
 /// df-pn 用の置換表。

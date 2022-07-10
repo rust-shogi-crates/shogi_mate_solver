@@ -261,7 +261,6 @@ mod tests {
     fn solve_mate_problem_works_3() {
         use shogi_usi_parser::FromUsi;
 
-        // From https://github.com/koba-e964/shogi-mate-problems/blob/d58d61336dd82096856bc3ac0ba372e5cd722bc8/2022-05-18/mate9.psn#L3
         let mut position = PartialPosition::from_usi("sfen 7kl/9/6G1p/9/9/9/9/9/9 b S 1").unwrap();
 
         let df_pn = DfPnTable::new(1 << 15);
