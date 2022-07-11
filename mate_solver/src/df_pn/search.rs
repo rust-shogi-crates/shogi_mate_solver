@@ -92,11 +92,13 @@ fn mid(
         );
         return (phi, delta);
     }
-    eprintln!(
-        "start: {:?} {} {} (hash = {} {})",
-        ctx, phi_now, delta_now, phi, delta
-    );
-    let moves = match node_kind {
+    if ctx.seq.len() <= 3 {
+        eprintln!(
+            "start: {:?} {} {} (hash = {} {})",
+            ctx, phi_now, delta_now, phi, delta
+        );
+    }
+    let mut moves = match node_kind {
         NodeKind::Or => position.all_checks(),
         NodeKind::And => position.all_evasions(),
     };
@@ -104,6 +106,11 @@ fn mid(
         put_in_hash(dfpn_tbl, position.zobrist_hash(), (u32::MAX, 0));
         return (u32::MAX, 0);
     }
+    // 駒打ちは価値の低い駒を優先
+    moves.sort_unstable_by_key(|&mv| match mv {
+        Move::Normal { .. } => 0,
+        Move::Drop { piece, .. } => 60 - piece.piece_kind() as u8,
+    });
     let mut children = vec![];
     for mv in moves {
         let mut cp = position.clone();
@@ -125,14 +132,16 @@ fn mid(
             phi_now = delta_min;
             delta_now = phi_sum;
             put_in_hash(dfpn_tbl, position.zobrist_hash(), (phi_now, delta_now));
-            eprintln!("end  : {:?} hash = {} {}", ctx, phi_now, delta_now);
+            if ctx.seq.len() <= 3 {
+                eprintln!("end  : {:?} hash = {} {}", ctx, phi_now, delta_now);
+            }
             return (phi_now, delta_now);
         }
         let ((mv, _n_c, phi_c, delta_c), delta_2) = select_child(dfpn_tbl, &children);
 
         let phi_n_c = if phi_c == u32::MAX - 1 {
             u32::MAX
-        } else if phi_now >= u32::MAX - 1 {
+        } else if delta_now >= u32::MAX - 1 {
             u32::MAX - 1
         } else {
             delta_now + phi_c - phi_sum
@@ -321,5 +330,19 @@ mod tests {
         let result = df_pn(&mut dfpn_tbl, &wrapped);
         // 詰み
         assert_eq!(result, (0, u32::MAX));
+    }
+
+    #[test]
+    fn solve_mate_problem_works_4() {
+        use shogi_usi_parser::FromUsi;
+
+        let position =
+            PartialPosition::from_usi("sfen 8k/9/9/9/9/9/9/9/9 b Rr2b4g4s4n4l18p 1").unwrap();
+        let wrapped = PositionWrapper::new(position.clone());
+
+        let mut dfpn_tbl = DfPnTable::new(1 << 20);
+        let result = df_pn(&mut dfpn_tbl, &wrapped);
+        // 不詰
+        assert_eq!(result, (u32::MAX, 0));
     }
 }

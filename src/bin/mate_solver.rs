@@ -6,7 +6,8 @@ use std::{
     process::{Command, Stdio},
 };
 
-use mate_solver::eval::search::{alpha_beta_me, alpha_beta_you, search};
+use mate_solver::df_pn::search as dfpnsearch;
+use mate_solver::eval::search as evalsearch;
 use mate_solver::eval::Value;
 use mate_solver::position_wrapper::PositionWrapper;
 use mate_solver::tt::{DfPnTable, EvalTable};
@@ -127,7 +128,7 @@ fn find_mate_sequence(
     let mut result = Vec::new();
     loop {
         let (_value, mv) = if turn % 2 == 0 {
-            alpha_beta_me(
+            evalsearch::alpha_beta_me(
                 &position,
                 df_pn,
                 evals,
@@ -136,7 +137,7 @@ fn find_mate_sequence(
                 &mut BTreeSet::new(),
             )
         } else {
-            alpha_beta_you(
+            evalsearch::alpha_beta_you(
                 &position,
                 df_pn,
                 evals,
@@ -159,9 +160,15 @@ fn find_mate_sequence(
 fn solve_myself(position: &PartialPosition, opts: &Opts) -> Option<Vec<Move>> {
     let size = 1 << 15;
 
-    let df_pn = DfPnTable::new(size);
+    let mut df_pn = DfPnTable::new(size);
+
     let mut eval = EvalTable::new(size);
-    let result = search(position, &df_pn, &mut eval);
+    let mate_result = dfpnsearch::df_pn(&mut df_pn, &PositionWrapper::new(position.clone()));
+    // 不詰。
+    if mate_result == (u32::MAX, 0) {
+        return None;
+    }
+    let result = evalsearch::search(position, &df_pn, &mut eval);
     if opts.verbose {
         eprintln!("! result = {:?}", result);
     }
