@@ -1,4 +1,4 @@
-use shogi_core::{Hand, Move, PartialPosition, Piece};
+use shogi_core::{Hand, Move, PartialPosition, Piece, ToUsi};
 use std::collections::BTreeSet;
 
 use crate::{
@@ -7,6 +7,40 @@ use crate::{
 };
 
 use super::Value;
+
+const LOG_THRESHOLD: usize = 3;
+
+#[derive(Clone, Default)]
+pub struct SearchCtx {
+    seq: Vec<Move>,
+}
+
+impl SearchCtx {
+    pub fn push(&mut self, mv: Move) {
+        self.seq.push(mv);
+    }
+    pub fn pop(&mut self) {
+        self.seq.pop();
+    }
+}
+
+impl core::fmt::Debug for SearchCtx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        for &mv in &self.seq {
+            write!(f, " {}", mv.to_usi_owned())?;
+        }
+        write!(f, "]")
+    }
+}
+
+fn one_less(x: Value) -> Value {
+    if x.plies() >= 1 {
+        x.plies_added_unchecked(-1)
+    } else {
+        Value::ZERO
+    }
+}
 
 // alpha-beta 法で探索する。
 pub fn search(position: &PartialPosition, df_pn: &DfPnTable, evals: &mut EvalTable) -> Value {
@@ -17,6 +51,7 @@ pub fn search(position: &PartialPosition, df_pn: &DfPnTable, evals: &mut EvalTab
         Value::ZERO,
         Value::new(12, 0, 0),
         &mut BTreeSet::new(),
+        &mut Default::default(),
     )
     .0
 }
@@ -29,26 +64,32 @@ pub fn alpha_beta_me(
     alpha: Value,
     mut beta: Value,
     seen: &mut BTreeSet<Key>,
+    ctx: &mut SearchCtx,
 ) -> (Value, Option<Move>) {
     if beta.plies() == 0 {
         // 0 手で詰ますことはできない。攻め方にとって最悪の評価値を返す。
         return (Value::INF, None);
     }
+    if let Some((pn, dn)) = df_pn.fetch(position.zobrist_hash()) {
+        if (pn, dn) == (u32::MAX, 0) {
+            // もう詰まないことが分かっている。攻め方にとって最悪の評価値を返す。
+            return (Value::INF, None);
+        }
+    }
+    if ctx.seq.len() <= LOG_THRESHOLD {
+        eprintln!(
+            "start: {:?} {:016x} {:?} {:?}",
+            ctx,
+            position.zobrist_hash(),
+            alpha,
+            beta,
+        );
+    }
     if let Some((memo_value, memo_move)) = evals.fetch(position.zobrist_hash()) {
         return (core::cmp::min(memo_value, beta), memo_move);
     }
-    let new_alpha = if alpha.plies() >= 1 {
-        alpha.plies_added_unchecked(-1)
-    } else {
-        Value::ZERO
-    };
-    let new_beta = if beta.plies() >= 1 {
-        beta.plies_added_unchecked(-1)
-    } else {
-        Value::ZERO
-    };
 
-    let all = position.all_checks();
+    let mut all = position.all_checks();
     if all.is_empty() {
         evals.insert(position.zobrist_hash(), (Value::INF, None));
         return (Value::INF, None);
@@ -59,13 +100,28 @@ pub fn alpha_beta_me(
     }
     seen.insert(position.zobrist_hash());
 
+    // 詰みがありそうな局面から探索する。
+    all.sort_unstable_by_key(|&mv| {
+        let mut cp = position.clone();
+        cp.make_move(mv);
+        if let Some((_, delta)) = df_pn.fetch(cp.zobrist_hash()) {
+            delta
+        } else {
+            1
+        }
+    });
+
     let mut best = None;
     for mv in all {
+        let new_alpha = one_less(alpha);
+        let new_beta = one_less(beta);
         let mut next = position.clone();
         next.make_move(mv);
-        let eval = alpha_beta_you(&next, df_pn, evals, new_alpha, new_beta, seen).0;
+        ctx.push(mv);
+        let eval = alpha_beta_you(&next, df_pn, evals, new_alpha, new_beta, seen, ctx).0;
+        ctx.pop();
         let eval = eval.plies_added_unchecked(1);
-        if eval <= beta {
+        if eval < beta {
             best = Some(mv);
             beta = eval
         }
@@ -81,6 +137,16 @@ pub fn alpha_beta_me(
     }
     evals.insert(position.zobrist_hash(), (beta, best));
     seen.remove(&position.zobrist_hash());
+    if ctx.seq.len() <= LOG_THRESHOLD {
+        eprintln!(
+            "end  : {:?} {:016x} {:?} {}",
+            ctx,
+            position.zobrist_hash(),
+            beta,
+            best.map(|mv| mv.to_usi_owned())
+                .unwrap_or_else(|| "none".to_owned()),
+        );
+    }
     (beta, best)
 }
 
@@ -92,24 +158,30 @@ pub fn alpha_beta_you(
     mut alpha: Value,
     beta: Value,
     seen: &mut BTreeSet<Key>,
+    ctx: &mut SearchCtx,
 ) -> (Value, Option<Move>) {
+    if let Some((dn, pn)) = df_pn.fetch(position.zobrist_hash()) {
+        if (pn, dn) == (u32::MAX, 0) {
+            // もう詰まないことが分かっている。攻め方にとって最悪の評価値を返す。
+            return (Value::INF, None);
+        }
+    }
+    if ctx.seq.len() <= LOG_THRESHOLD {
+        eprintln!(
+            "start: {:?} {:016x} {:?} {:?}",
+            ctx,
+            position.zobrist_hash(),
+            alpha,
+            beta,
+        );
+    }
     if alpha >= beta {
         return (alpha, None);
     }
     if let Some((memo_value, memo_move)) = evals.fetch(position.zobrist_hash()) {
         return (core::cmp::max(memo_value, alpha), memo_move);
     }
-    let new_alpha = if alpha.plies() >= 1 {
-        alpha.plies_added_unchecked(-1)
-    } else {
-        Value::ZERO
-    };
-    let new_beta = if beta.plies() >= 1 {
-        beta.plies_added_unchecked(-1)
-    } else {
-        Value::ZERO
-    };
-    let all = position.all_evasions();
+    let mut all = position.all_evasions();
     if all.is_empty() {
         let mut pieces = 0;
         for piece_kind in Hand::all_hand_pieces() {
@@ -120,6 +192,14 @@ pub fn alpha_beta_you(
         }
         let value = Value::new(0, pieces as u32, 0);
         evals.insert(position.zobrist_hash(), (value, None));
+        if ctx.seq.len() <= LOG_THRESHOLD {
+            eprintln!(
+                "mate : {:?} {:016x} {:?}",
+                ctx,
+                position.zobrist_hash(),
+                value,
+            );
+        }
         return (value, None);
     }
 
@@ -128,13 +208,29 @@ pub fn alpha_beta_you(
     }
     seen.insert(position.zobrist_hash());
 
+    // 逃れがありそうな局面から探索する。
+    all.sort_unstable_by_key(|&mv| {
+        let mut cp = position.clone();
+        cp.make_move(mv);
+        if let Some((_, delta)) = df_pn.fetch(cp.zobrist_hash()) {
+            delta
+        } else {
+            1
+        }
+    });
+
     let mut best = None;
     for &mv in &all {
+        let new_alpha = one_less(alpha);
+        let new_beta = one_less(beta);
+
         let mut next = position.clone();
         next.make_move(mv);
-        let eval = alpha_beta_me(&next, df_pn, evals, new_alpha, new_beta, seen).0;
+        ctx.push(mv);
+        let eval = alpha_beta_me(&next, df_pn, evals, new_alpha, new_beta, seen, ctx).0;
+        ctx.pop();
         let eval = eval.plies_added_unchecked(1);
-        if eval >= alpha {
+        if eval > alpha {
             best = Some(mv);
             alpha = eval;
         }
@@ -145,6 +241,16 @@ pub fn alpha_beta_you(
     }
     evals.insert(position.zobrist_hash(), (alpha, best));
     seen.remove(&position.zobrist_hash());
+    if ctx.seq.len() <= LOG_THRESHOLD {
+        eprintln!(
+            "end  : {:?} {:016x} {:?} {}",
+            ctx,
+            position.zobrist_hash(),
+            alpha,
+            best.map(|mv| mv.to_usi_owned())
+                .unwrap_or_else(|| "none".to_owned()),
+        );
+    }
     (alpha, best)
 }
 
@@ -163,6 +269,7 @@ mod tests {
         let mut beta = opt.plies_added_unchecked(1);
         let mut position = PositionWrapper::new(position.clone());
         let mut result = Vec::new();
+        let mut ctx = SearchCtx::default();
         loop {
             let (_value, mv) = if turn % 2 == 0 {
                 alpha_beta_me(
@@ -172,6 +279,7 @@ mod tests {
                     Value::ZERO,
                     beta,
                     &mut BTreeSet::new(),
+                    &mut ctx,
                 )
             } else {
                 alpha_beta_you(
@@ -181,6 +289,7 @@ mod tests {
                     Value::ZERO,
                     beta,
                     &mut BTreeSet::new(),
+                    &mut ctx,
                 )
             };
             if let Some(mv) = mv {
@@ -203,8 +312,12 @@ mod tests {
             PartialPosition::from_usi("sfen 3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1")
                 .unwrap();
 
-        let df_pn = DfPnTable::new(1 << 15);
+        let mut df_pn = DfPnTable::new(1 << 15);
         let mut eval = EvalTable::new(1 << 20);
+
+        let _mate_result =
+            crate::df_pn::search::df_pn(&mut df_pn, &PositionWrapper::new(position.clone()));
+
         let result = search(&position, &df_pn, &mut eval);
         eprintln!("result = {:?}", result);
         let sequence = find_mate_sequence(&df_pn, &mut eval, &position, result);
@@ -236,8 +349,12 @@ mod tests {
             }, // 32玉
         ];
 
-        let df_pn = DfPnTable::new(1 << 15);
+        let mut df_pn = DfPnTable::new(1 << 15);
         let mut evals = EvalTable::new(1 << 15);
+
+        let _mate_result =
+            crate::df_pn::search::df_pn(&mut df_pn, &PositionWrapper::new(position.clone()));
+
         let result = search(&position, &df_pn, &mut evals);
         eprintln!("result = {:?}", result);
         let sequence = find_mate_sequence(&df_pn, &mut evals, &position, result);
@@ -263,8 +380,12 @@ mod tests {
 
         let mut position = PartialPosition::from_usi("sfen 7kl/9/6G1p/9/9/9/9/9/9 b S 1").unwrap();
 
-        let df_pn = DfPnTable::new(1 << 15);
+        let mut df_pn = DfPnTable::new(1 << 15);
         let mut eval = EvalTable::new(1 << 15);
+
+        let _mate_result =
+            crate::df_pn::search::df_pn(&mut df_pn, &PositionWrapper::new(position.clone()));
+
         let result = search(&position, &df_pn, &mut eval);
         eprintln!("result = {:?}", result);
         let sequence = find_mate_sequence(&df_pn, &mut eval, &position, result);

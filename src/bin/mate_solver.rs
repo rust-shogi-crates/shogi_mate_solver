@@ -127,6 +127,7 @@ fn find_mate_sequence(
     let mut position = PositionWrapper::new(position.clone());
     let mut result = Vec::new();
     loop {
+        let mut ctx = evalsearch::SearchCtx::default();
         let (_value, mv) = if turn % 2 == 0 {
             evalsearch::alpha_beta_me(
                 &position,
@@ -135,6 +136,7 @@ fn find_mate_sequence(
                 Value::ZERO,
                 beta,
                 &mut BTreeSet::new(),
+                &mut ctx,
             )
         } else {
             evalsearch::alpha_beta_you(
@@ -144,6 +146,7 @@ fn find_mate_sequence(
                 Value::ZERO,
                 beta,
                 &mut BTreeSet::new(),
+                &mut ctx,
             )
         };
         if let Some(mv) = mv {

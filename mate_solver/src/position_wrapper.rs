@@ -92,6 +92,8 @@ impl PositionWrapper {
             }
             diff ^= COLOR_HASH;
             self.hash ^= diff;
+        } else {
+            unreachable!();
         }
     }
 

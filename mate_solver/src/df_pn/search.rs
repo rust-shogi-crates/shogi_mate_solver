@@ -94,8 +94,13 @@ fn mid(
     }
     if ctx.seq.len() <= 3 {
         eprintln!(
-            "start: {:?} {} {} (hash = {} {})",
-            ctx, phi_now, delta_now, phi, delta
+            "start: {:?} {:016x} {} {} (hash = {} {})",
+            ctx,
+            position.zobrist_hash(),
+            phi_now,
+            delta_now,
+            phi,
+            delta
         );
     }
     let mut moves = match node_kind {
@@ -122,18 +127,21 @@ fn mid(
     // 4. 多重反復深化
     loop {
         let phi_sum = phi_sum(dfpn_tbl, &children);
-        let delta_min = if phi_sum >= u32::MAX - 1 {
-            0
-        } else {
-            delta_min(dfpn_tbl, &children)
-        };
+        let delta_min = delta_min(dfpn_tbl, &children);
+
         // φ か δ がそのしきい値以上なら探索終了
         if phi_now <= delta_min || delta_now <= phi_sum {
             phi_now = delta_min;
             delta_now = phi_sum;
             put_in_hash(dfpn_tbl, position.zobrist_hash(), (phi_now, delta_now));
             if ctx.seq.len() <= 3 {
-                eprintln!("end  : {:?} hash = {} {}", ctx, phi_now, delta_now);
+                eprintln!(
+                    "end  : {:?} {:016x} hash = {} {}",
+                    ctx,
+                    position.zobrist_hash(),
+                    phi_now,
+                    delta_now
+                );
             }
             return (phi_now, delta_now);
         }
@@ -153,6 +161,7 @@ fn mid(
         };
         let mut next = position.clone();
         next.make_move(mv);
+        assert_eq!(next.zobrist_hash(), _n_c);
         ctx.push(mv);
         mid(dfpn_tbl, &next, (phi_n_c, delta_n_c), node_kind.flip(), ctx);
         ctx.pop();
