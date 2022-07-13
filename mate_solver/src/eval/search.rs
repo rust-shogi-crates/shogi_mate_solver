@@ -43,7 +43,7 @@ fn one_less(x: Value) -> Value {
 }
 
 // alpha-beta 法で探索する。
-pub fn search(position: &PartialPosition, df_pn: &DfPnTable, evals: &mut EvalTable) -> Value {
+pub fn search(position: &PartialPosition, df_pn: &mut DfPnTable, evals: &mut EvalTable) -> Value {
     alpha_beta_me(
         &PositionWrapper::new(position.clone()),
         df_pn,
@@ -59,7 +59,7 @@ pub fn search(position: &PartialPosition, df_pn: &DfPnTable, evals: &mut EvalTab
 // alpha-beta 法で攻め方の手を探索する。
 pub fn alpha_beta_me(
     position: &PositionWrapper,
-    df_pn: &DfPnTable,
+    df_pn: &mut DfPnTable,
     evals: &mut EvalTable,
     alpha: Value,
     mut beta: Value,
@@ -73,6 +73,21 @@ pub fn alpha_beta_me(
     if let Some((pn, dn)) = df_pn.fetch(position.zobrist_hash()) {
         if (pn, dn) == (u32::MAX, 0) {
             // もう詰まないことが分かっている。攻め方にとって最悪の評価値を返す。
+            return (Value::INF, None);
+        }
+    }
+    // df_pn で簡単に不詰が読み切れるのであればそうする
+    if beta.plies() >= 3 {
+        let mate_result = crate::df_pn::search::mid(
+            df_pn,
+            position,
+            (10, 10),
+            crate::df_pn::search::NodeKind::Or,
+            false,
+            &mut Default::default(),
+        );
+        if mate_result == (u32::MAX, 0) {
+            // 不詰を読み切れたので攻め方にとって最悪の評価値を返す。
             return (Value::INF, None);
         }
     }
@@ -153,7 +168,7 @@ pub fn alpha_beta_me(
 // alpha-beta 法で玉方の手を探索する。
 pub fn alpha_beta_you(
     position: &PositionWrapper,
-    df_pn: &DfPnTable,
+    df_pn: &mut DfPnTable,
     evals: &mut EvalTable,
     mut alpha: Value,
     beta: Value,
@@ -260,7 +275,7 @@ mod tests {
     use shogi_core::{Square, ToUsi};
 
     fn find_mate_sequence(
-        df_pn: &DfPnTable,
+        df_pn: &mut DfPnTable,
         evals: &mut EvalTable,
         position: &PartialPosition,
         opt: Value,
@@ -318,9 +333,9 @@ mod tests {
         let _mate_result =
             crate::df_pn::search::df_pn(&mut df_pn, &PositionWrapper::new(position.clone()));
 
-        let result = search(&position, &df_pn, &mut eval);
+        let result = search(&position, &mut df_pn, &mut eval);
         eprintln!("result = {:?}", result);
-        let sequence = find_mate_sequence(&df_pn, &mut eval, &position, result);
+        let sequence = find_mate_sequence(&mut df_pn, &mut eval, &position, result);
         for &mv in &sequence {
             eprintln!("{}", mv.to_usi_owned());
             position.make_move(mv).unwrap();
@@ -355,9 +370,9 @@ mod tests {
         let _mate_result =
             crate::df_pn::search::df_pn(&mut df_pn, &PositionWrapper::new(position.clone()));
 
-        let result = search(&position, &df_pn, &mut evals);
+        let result = search(&position, &mut df_pn, &mut evals);
         eprintln!("result = {:?}", result);
-        let sequence = find_mate_sequence(&df_pn, &mut evals, &position, result);
+        let sequence = find_mate_sequence(&mut df_pn, &mut evals, &position, result);
         {
             let mut tmp = position.clone();
             for &mv in &sequence {
@@ -370,7 +385,7 @@ mod tests {
         for &mv in &moves {
             position.make_move(mv).unwrap();
         }
-        let result = search(&position, &df_pn, &mut evals);
+        let result = search(&position, &mut df_pn, &mut evals);
         assert_eq!(result.plies(), 7);
     }
 
@@ -386,9 +401,9 @@ mod tests {
         let _mate_result =
             crate::df_pn::search::df_pn(&mut df_pn, &PositionWrapper::new(position.clone()));
 
-        let result = search(&position, &df_pn, &mut eval);
+        let result = search(&position, &mut df_pn, &mut eval);
         eprintln!("result = {:?}", result);
-        let sequence = find_mate_sequence(&df_pn, &mut eval, &position, result);
+        let sequence = find_mate_sequence(&mut df_pn, &mut eval, &position, result);
         let expected = [
             "S*3b", // 32銀
             "2a1b", // 12玉

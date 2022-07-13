@@ -117,7 +117,7 @@ go
 }
 
 fn find_mate_sequence(
-    df_pn: &DfPnTable,
+    df_pn: &mut DfPnTable,
     evals: &mut EvalTable,
     position: &PartialPosition,
     opt: Value,
@@ -171,14 +171,14 @@ fn solve_myself(position: &PartialPosition, opts: &Opts) -> Option<Vec<Move>> {
     if mate_result == (u32::MAX, 0) {
         return None;
     }
-    let result = evalsearch::search(position, &df_pn, &mut eval);
+    let result = evalsearch::search(position, &mut df_pn, &mut eval);
     if opts.verbose {
         eprintln!("! result = {:?}", result);
     }
     if !result.is_mate() {
         return None;
     }
-    let sequence = find_mate_sequence(&df_pn, &mut eval, position, result);
+    let sequence = find_mate_sequence(&mut df_pn, &mut eval, position, result);
     Some(sequence)
 }
 

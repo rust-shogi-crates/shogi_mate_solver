@@ -8,8 +8,10 @@ use crate::{
 };
 
 #[derive(Clone, Copy)]
-enum NodeKind {
+pub enum NodeKind {
+    /// 攻め方
     Or,
+    /// 玉方
     And,
 }
 
@@ -23,15 +25,15 @@ impl NodeKind {
 }
 
 #[derive(Clone, Default)]
-struct SearchCtx {
+pub struct SearchCtx {
     seq: Vec<Move>,
 }
 
 impl SearchCtx {
-    fn push(&mut self, mv: Move) {
+    pub fn push(&mut self, mv: Move) {
         self.seq.push(mv);
     }
-    fn pop(&mut self) {
+    pub fn pop(&mut self) {
         self.seq.pop();
     }
 }
@@ -76,7 +78,7 @@ pub fn df_pn(dfpn_tbl: &mut DfPnTable, position: &PositionWrapper) -> (u32, u32)
 
 // ノードの展開
 // (新しい phi(現在の局面), 新しい delta(現在の局面)) を返す。
-fn mid(
+pub fn mid(
     dfpn_tbl: &mut DfPnTable,
     position: &PositionWrapper,
     (mut phi_now, mut delta_now): (u32, u32),
