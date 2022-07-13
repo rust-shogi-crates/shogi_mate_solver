@@ -55,6 +55,7 @@ pub fn df_pn(dfpn_tbl: &mut DfPnTable, position: &PositionWrapper) -> (u32, u32)
         position,
         (u32::MAX - 1, u32::MAX - 1),
         NodeKind::Or,
+        true,
         &mut Default::default(),
     );
     // ループを見つけてしまった
@@ -66,6 +67,7 @@ pub fn df_pn(dfpn_tbl: &mut DfPnTable, position: &PositionWrapper) -> (u32, u32)
             position,
             (u32::MAX, u32::MAX),
             NodeKind::Or,
+            false,
             &mut Default::default(),
         );
     }
@@ -79,6 +81,7 @@ fn mid(
     position: &PositionWrapper,
     (mut phi_now, mut delta_now): (u32, u32),
     node_kind: NodeKind,
+    allow_loop: bool,
     ctx: &mut SearchCtx,
 ) -> (u32, u32) {
     if ctx.seq.len() >= 50 {
@@ -123,7 +126,17 @@ fn mid(
         children.push((mv, cp.zobrist_hash()));
     }
     // 3. ハッシュによるサイクル回避
-    put_in_hash(dfpn_tbl, position.zobrist_hash(), (phi_now, delta_now));
+    if allow_loop {
+        put_in_hash(dfpn_tbl, position.zobrist_hash(), (phi_now, delta_now));
+    } else {
+        // どちらの手番でも不詰とする。
+        let value = match node_kind {
+            NodeKind::Or => (u32::MAX, 0),
+            NodeKind::And => (0, u32::MAX),
+        };
+        put_in_hash(dfpn_tbl, position.zobrist_hash(), value);
+    }
+
     // 4. 多重反復深化
     loop {
         let phi_sum = phi_sum(dfpn_tbl, &children);
@@ -161,9 +174,15 @@ fn mid(
         };
         let mut next = position.clone();
         next.make_move(mv);
-        assert_eq!(next.zobrist_hash(), _n_c);
         ctx.push(mv);
-        mid(dfpn_tbl, &next, (phi_n_c, delta_n_c), node_kind.flip(), ctx);
+        mid(
+            dfpn_tbl,
+            &next,
+            (phi_n_c, delta_n_c),
+            node_kind.flip(),
+            allow_loop,
+            ctx,
+        );
         ctx.pop();
     }
 }
@@ -226,11 +245,23 @@ fn delta_min(dfpn_tbl: &DfPnTable, children: &[(Move, Key)]) -> u32 {
 // nの子ノードのφの和を計算
 fn phi_sum(dfpn_tbl: &DfPnTable, children: &[(Move, Key)]) -> u32 {
     let mut sum: u32 = 0;
+    let mut infm1 = false;
     for &child in children {
         let (phi, _) = look_up_hash(dfpn_tbl, child.1);
-        sum = sum.saturating_add(phi);
+        if phi == u32::MAX {
+            return u32::MAX;
+        }
+        if phi == u32::MAX - 1 {
+            infm1 = true;
+        } else {
+            sum = sum.saturating_add(phi);
+        }
     }
-    sum
+    if infm1 {
+        u32::MAX - 1
+    } else {
+        sum
+    }
 }
 
 #[cfg(test)]
