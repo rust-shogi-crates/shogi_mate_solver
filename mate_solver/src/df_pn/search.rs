@@ -277,7 +277,7 @@ mod tests {
         let position =
             PartialPosition::from_usi("sfen 3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1")
                 .unwrap();
-        let wrapped = PositionWrapper::new(position.clone());
+        let wrapped = PositionWrapper::new(position);
 
         let mut dfpn_tbl = DfPnTable::new(1 << 15);
         let result = df_pn(&mut dfpn_tbl, &wrapped);
@@ -335,7 +335,7 @@ mod tests {
         let position =
             PartialPosition::from_usi("sfen 5kgnl/9/4+B1pp1/8p/9/9/9/9/9 b 2S2rb3g2s3n3l15p 1")
                 .unwrap();
-        let wrapped = PositionWrapper::new(position.clone());
+        let wrapped = PositionWrapper::new(position);
 
         let mut dfpn_tbl = DfPnTable::new(1 << 20);
         let result = df_pn(&mut dfpn_tbl, &wrapped);
@@ -351,7 +351,7 @@ mod tests {
         let position =
             PartialPosition::from_usi("sfen 7nk/9/6PB1/6NP1/9/9/9/9/9 b P2rb4g4s2n4l15p 1")
                 .unwrap();
-        let wrapped = PositionWrapper::new(position.clone());
+        let wrapped = PositionWrapper::new(position);
 
         let mut dfpn_tbl = DfPnTable::new(1 << 20);
         let result = df_pn(&mut dfpn_tbl, &wrapped);
@@ -364,7 +364,7 @@ mod tests {
         use shogi_usi_parser::FromUsi;
 
         let position = PartialPosition::from_usi("sfen 7kl/9/6G1p/9/9/9/9/9/9 b S 1").unwrap();
-        let wrapped = PositionWrapper::new(position.clone());
+        let wrapped = PositionWrapper::new(position);
 
         let mut dfpn_tbl = DfPnTable::new(1 << 20);
         let result = df_pn(&mut dfpn_tbl, &wrapped);
@@ -378,7 +378,7 @@ mod tests {
 
         let position =
             PartialPosition::from_usi("sfen 8k/9/9/9/9/9/9/9/9 b Rr2b4g4s4n4l18p 1").unwrap();
-        let wrapped = PositionWrapper::new(position.clone());
+        let wrapped = PositionWrapper::new(position);
 
         let mut dfpn_tbl = DfPnTable::new(1 << 20);
         let result = df_pn(&mut dfpn_tbl, &wrapped);
