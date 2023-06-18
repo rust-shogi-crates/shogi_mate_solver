@@ -97,6 +97,18 @@ impl PositionWrapper {
         }
     }
 
+    /// 攻め方 (先手) の持ち駒を相手の駒台に移動させる。ハッシュ値も更新する。
+    pub fn give_piece(&mut self, piece_kind: PieceKind) {
+        let s = self.inner.hand_of_a_player_mut(Color::Black);
+        *s = s.removed(piece_kind).unwrap();
+        self.hash ^= TABLE.hands[Color::Black.array_index()][piece_kind.array_index()]
+            [s.count(piece_kind).unwrap() as usize];
+        let s = self.inner.hand_of_a_player_mut(Color::White);
+        self.hash ^= TABLE.hands[Color::White.array_index()][piece_kind.array_index()]
+            [s.count(piece_kind).unwrap() as usize];
+        *s = s.added(piece_kind).unwrap();
+    }
+
     /// 局面のハッシュ値を計算する。
     fn compute_hash(position: &PartialPosition) -> Key {
         let mut x = 0;
@@ -250,5 +262,20 @@ mod tests {
             );
         }
         assert_eq!(hashes[2], hashes[8]);
+    }
+
+    #[test]
+    fn give_piece_works() {
+        let piece_kind = PieceKind::Pawn;
+        let mut position = PartialPosition::startpos();
+        position
+            .hand_of_a_player_mut(Color::Black)
+            .Hand_add(piece_kind);
+        let mut position = PositionWrapper::new(position);
+        position.give_piece(piece_kind);
+        assert_eq!(
+            position.hash,
+            PositionWrapper::compute_hash(&position.inner),
+        );
     }
 }
