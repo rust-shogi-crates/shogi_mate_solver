@@ -164,7 +164,7 @@ fn find_mate_sequence(
 }
 
 fn solve_myself(position: &PartialPosition, opts: &Opts) -> Option<Vec<Move>> {
-    let size = 1 << 17;
+    let size = 1 << 16;
 
     let mut df_pn = DfPnTable::new(size);
 
