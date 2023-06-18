@@ -51,7 +51,7 @@ impl core::fmt::Debug for SearchCtx {
 }
 
 // ルートでの反復深化
-pub fn df_pn(dfpn_tbl: &mut DfPnTable, position: &PositionWrapper) -> (u32, u32) {
+pub fn df_pn(dfpn_tbl: &mut DfPnTable, position: &PositionWrapper, verbose: bool) -> (u32, u32) {
     let (phi_now, delta_now) = mid(
         dfpn_tbl,
         position,
@@ -59,6 +59,7 @@ pub fn df_pn(dfpn_tbl: &mut DfPnTable, position: &PositionWrapper) -> (u32, u32)
         NodeKind::Or,
         true,
         &mut Default::default(),
+        verbose,
     );
     // ループを見つけてしまった
     if phi_now != u32::MAX && delta_now != u32::MAX {
@@ -71,6 +72,7 @@ pub fn df_pn(dfpn_tbl: &mut DfPnTable, position: &PositionWrapper) -> (u32, u32)
             NodeKind::Or,
             false,
             &mut Default::default(),
+            verbose,
         );
     }
     (phi_now, delta_now)
@@ -85,19 +87,20 @@ pub fn mid(
     node_kind: NodeKind,
     allow_loop: bool,
     ctx: &mut SearchCtx,
+    verbose: bool,
 ) -> (u32, u32) {
     if ctx.seq.len() >= 50 {
         panic!();
     }
     let (phi, delta) = look_up_hash(dfpn_tbl, position.zobrist_hash());
-    if phi_now <= phi || delta_now <= delta {
+    if verbose && (phi_now <= phi || delta_now <= delta) {
         eprintln!(
             "cut  : {:?} {} {} (hash = {} {})",
             ctx, phi_now, delta_now, phi, delta
         );
         return (phi, delta);
     }
-    if ctx.seq.len() <= 3 {
+    if verbose && ctx.seq.len() <= 3 {
         eprintln!(
             "start: {:?} {:016x} {} {} (hash = {} {})",
             ctx,
@@ -149,7 +152,7 @@ pub fn mid(
             phi_now = delta_min;
             delta_now = phi_sum;
             put_in_hash(dfpn_tbl, position.zobrist_hash(), (phi_now, delta_now));
-            if ctx.seq.len() <= 3 {
+            if verbose && ctx.seq.len() <= 3 {
                 eprintln!(
                     "end  : {:?} {:016x} hash = {} {}",
                     ctx,
@@ -184,6 +187,7 @@ pub fn mid(
             node_kind.flip(),
             allow_loop,
             ctx,
+            verbose,
         );
         ctx.pop();
     }
@@ -282,7 +286,7 @@ mod tests {
         let wrapped = PositionWrapper::new(position);
 
         let mut dfpn_tbl = DfPnTable::new(1 << 15);
-        let result = df_pn(&mut dfpn_tbl, &wrapped);
+        let result = df_pn(&mut dfpn_tbl, &wrapped, false);
         // 詰み
         assert_eq!(result, (0, u32::MAX));
 
@@ -303,7 +307,7 @@ mod tests {
         for mv in moves {
             tmp.make_move(mv);
         }
-        let result = df_pn(&mut dfpn_tbl, &tmp);
+        let result = df_pn(&mut dfpn_tbl, &tmp, false);
         // 不詰
         assert_eq!(result, (u32::MAX, 0));
 
@@ -324,7 +328,7 @@ mod tests {
         for mv in moves {
             tmp.make_move(mv);
         }
-        let result = df_pn(&mut dfpn_tbl, &tmp);
+        let result = df_pn(&mut dfpn_tbl, &tmp, false);
         // 不詰
         assert_eq!(result, (u32::MAX, 0));
     }
@@ -340,7 +344,7 @@ mod tests {
         let wrapped = PositionWrapper::new(position);
 
         let mut dfpn_tbl = DfPnTable::new(1 << 20);
-        let result = df_pn(&mut dfpn_tbl, &wrapped);
+        let result = df_pn(&mut dfpn_tbl, &wrapped, false);
         // 詰み
         assert_eq!(result, (0, u32::MAX));
     }
@@ -356,7 +360,7 @@ mod tests {
         let wrapped = PositionWrapper::new(position);
 
         let mut dfpn_tbl = DfPnTable::new(1 << 20);
-        let result = df_pn(&mut dfpn_tbl, &wrapped);
+        let result = df_pn(&mut dfpn_tbl, &wrapped, false);
         // 詰み
         assert_eq!(result, (0, u32::MAX));
     }
@@ -369,7 +373,7 @@ mod tests {
         let wrapped = PositionWrapper::new(position);
 
         let mut dfpn_tbl = DfPnTable::new(1 << 20);
-        let result = df_pn(&mut dfpn_tbl, &wrapped);
+        let result = df_pn(&mut dfpn_tbl, &wrapped, false);
         // 詰み
         assert_eq!(result, (0, u32::MAX));
     }
@@ -383,7 +387,7 @@ mod tests {
         let wrapped = PositionWrapper::new(position);
 
         let mut dfpn_tbl = DfPnTable::new(1 << 20);
-        let result = df_pn(&mut dfpn_tbl, &wrapped);
+        let result = df_pn(&mut dfpn_tbl, &wrapped, false);
         // 不詰
         assert_eq!(result, (u32::MAX, 0));
     }

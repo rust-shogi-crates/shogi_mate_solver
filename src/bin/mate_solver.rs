@@ -121,6 +121,7 @@ fn find_mate_sequence(
     evals: &mut EvalTable,
     position: &PartialPosition,
     opt: Value,
+    opts: &Opts,
 ) -> Vec<Move> {
     let mut turn = 0;
     let mut beta = opt.plies_added_unchecked(1);
@@ -137,6 +138,7 @@ fn find_mate_sequence(
                 beta,
                 &mut BTreeSet::new(),
                 &mut ctx,
+                opts.verbose,
             )
         } else {
             evalsearch::alpha_beta_you(
@@ -147,6 +149,7 @@ fn find_mate_sequence(
                 beta,
                 &mut BTreeSet::new(),
                 &mut ctx,
+                opts.verbose,
             )
         };
         if let Some(mv) = mv {
@@ -161,24 +164,28 @@ fn find_mate_sequence(
 }
 
 fn solve_myself(position: &PartialPosition, opts: &Opts) -> Option<Vec<Move>> {
-    let size = 1 << 15;
+    let size = 1 << 17;
 
     let mut df_pn = DfPnTable::new(size);
 
     let mut eval = EvalTable::new(size);
-    let mate_result = dfpnsearch::df_pn(&mut df_pn, &PositionWrapper::new(position.clone()));
+    let mate_result = dfpnsearch::df_pn(
+        &mut df_pn,
+        &PositionWrapper::new(position.clone()),
+        opts.verbose,
+    );
     // 不詰。
     if mate_result == (u32::MAX, 0) {
         return None;
     }
-    let result = evalsearch::search(position, &mut df_pn, &mut eval);
+    let result = evalsearch::search(position, &mut df_pn, &mut eval, opts.verbose);
     if opts.verbose {
         eprintln!("! result = {:?}", result);
     }
     if !result.is_mate() {
         return None;
     }
-    let sequence = find_mate_sequence(&mut df_pn, &mut eval, position, result);
+    let sequence = find_mate_sequence(&mut df_pn, &mut eval, position, result, opts);
     Some(sequence)
 }
 

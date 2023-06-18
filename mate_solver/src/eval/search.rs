@@ -43,7 +43,12 @@ fn one_less(x: Value) -> Value {
 }
 
 // alpha-beta 法で探索する。
-pub fn search(position: &PartialPosition, df_pn: &mut DfPnTable, evals: &mut EvalTable) -> Value {
+pub fn search(
+    position: &PartialPosition,
+    df_pn: &mut DfPnTable,
+    evals: &mut EvalTable,
+    verbose: bool,
+) -> Value {
     alpha_beta_me(
         &PositionWrapper::new(position.clone()),
         df_pn,
@@ -52,11 +57,13 @@ pub fn search(position: &PartialPosition, df_pn: &mut DfPnTable, evals: &mut Eva
         Value::new(12, 0, 0),
         &mut BTreeSet::new(),
         &mut Default::default(),
+        verbose,
     )
     .0
 }
 
 // alpha-beta 法で攻め方の手を探索する。
+#[allow(clippy::too_many_arguments)]
 pub fn alpha_beta_me(
     position: &PositionWrapper,
     df_pn: &mut DfPnTable,
@@ -65,6 +72,7 @@ pub fn alpha_beta_me(
     mut beta: Value,
     seen: &mut BTreeSet<Key>,
     ctx: &mut SearchCtx,
+    verbose: bool,
 ) -> (Value, Option<Move>) {
     if beta.plies() == 0 {
         // 0 手で詰ますことはできない。攻め方にとって最悪の評価値を返す。
@@ -85,13 +93,14 @@ pub fn alpha_beta_me(
             crate::df_pn::search::NodeKind::Or,
             false,
             &mut Default::default(),
+            verbose,
         );
         if mate_result == (u32::MAX, 0) {
             // 不詰を読み切れたので攻め方にとって最悪の評価値を返す。
             return (Value::INF, None);
         }
     }
-    if ctx.seq.len() <= LOG_THRESHOLD {
+    if verbose && ctx.seq.len() <= LOG_THRESHOLD {
         eprintln!(
             "start: {:?} {:016x} {:?} {:?}",
             ctx,
@@ -133,7 +142,7 @@ pub fn alpha_beta_me(
         let mut next = position.clone();
         next.make_move(mv);
         ctx.push(mv);
-        let eval = alpha_beta_you(&next, df_pn, evals, new_alpha, new_beta, seen, ctx).0;
+        let eval = alpha_beta_you(&next, df_pn, evals, new_alpha, new_beta, seen, ctx, verbose).0;
         ctx.pop();
         let eval = eval.plies_added_unchecked(1);
         if eval < beta {
@@ -152,7 +161,7 @@ pub fn alpha_beta_me(
     }
     evals.insert(position.zobrist_hash(), (beta, best));
     seen.remove(&position.zobrist_hash());
-    if ctx.seq.len() <= LOG_THRESHOLD {
+    if verbose && ctx.seq.len() <= LOG_THRESHOLD {
         eprintln!(
             "end  : {:?} {:016x} {:?} {}",
             ctx,
@@ -166,6 +175,7 @@ pub fn alpha_beta_me(
 }
 
 // alpha-beta 法で玉方の手を探索する。
+#[allow(clippy::too_many_arguments)]
 pub fn alpha_beta_you(
     position: &PositionWrapper,
     df_pn: &mut DfPnTable,
@@ -174,6 +184,7 @@ pub fn alpha_beta_you(
     beta: Value,
     seen: &mut BTreeSet<Key>,
     ctx: &mut SearchCtx,
+    verbose: bool,
 ) -> (Value, Option<Move>) {
     if let Some((dn, pn)) = df_pn.fetch(position.zobrist_hash()) {
         if (pn, dn) == (u32::MAX, 0) {
@@ -181,7 +192,7 @@ pub fn alpha_beta_you(
             return (Value::INF, None);
         }
     }
-    if ctx.seq.len() <= LOG_THRESHOLD {
+    if verbose && ctx.seq.len() <= LOG_THRESHOLD {
         eprintln!(
             "start: {:?} {:016x} {:?} {:?}",
             ctx,
@@ -242,7 +253,7 @@ pub fn alpha_beta_you(
         let mut next = position.clone();
         next.make_move(mv);
         ctx.push(mv);
-        let eval = alpha_beta_me(&next, df_pn, evals, new_alpha, new_beta, seen, ctx).0;
+        let eval = alpha_beta_me(&next, df_pn, evals, new_alpha, new_beta, seen, ctx, verbose).0;
         ctx.pop();
         let eval = eval.plies_added_unchecked(1);
         if eval > alpha {
@@ -256,7 +267,7 @@ pub fn alpha_beta_you(
     }
     evals.insert(position.zobrist_hash(), (alpha, best));
     seen.remove(&position.zobrist_hash());
-    if ctx.seq.len() <= LOG_THRESHOLD {
+    if verbose && ctx.seq.len() <= LOG_THRESHOLD {
         eprintln!(
             "end  : {:?} {:016x} {:?} {}",
             ctx,
@@ -295,6 +306,7 @@ mod tests {
                     beta,
                     &mut BTreeSet::new(),
                     &mut ctx,
+                    false,
                 )
             } else {
                 alpha_beta_you(
@@ -305,6 +317,7 @@ mod tests {
                     beta,
                     &mut BTreeSet::new(),
                     &mut ctx,
+                    false,
                 )
             };
             if let Some(mv) = mv {
@@ -331,9 +344,9 @@ mod tests {
         let mut eval = EvalTable::new(1 << 20);
 
         let _mate_result =
-            crate::df_pn::search::df_pn(&mut df_pn, &PositionWrapper::new(position.clone()));
+            crate::df_pn::search::df_pn(&mut df_pn, &PositionWrapper::new(position.clone()), false);
 
-        let result = search(&position, &mut df_pn, &mut eval);
+        let result = search(&position, &mut df_pn, &mut eval, false);
         eprintln!("result = {:?}", result);
         let sequence = find_mate_sequence(&mut df_pn, &mut eval, &position, result);
         for &mv in &sequence {
@@ -368,9 +381,9 @@ mod tests {
         let mut evals = EvalTable::new(1 << 15);
 
         let _mate_result =
-            crate::df_pn::search::df_pn(&mut df_pn, &PositionWrapper::new(position.clone()));
+            crate::df_pn::search::df_pn(&mut df_pn, &PositionWrapper::new(position.clone()), false);
 
-        let result = search(&position, &mut df_pn, &mut evals);
+        let result = search(&position, &mut df_pn, &mut evals, false);
         eprintln!("result = {:?}", result);
         let sequence = find_mate_sequence(&mut df_pn, &mut evals, &position, result);
         {
@@ -385,7 +398,7 @@ mod tests {
         for &mv in &moves {
             position.make_move(mv).unwrap();
         }
-        let result = search(&position, &mut df_pn, &mut evals);
+        let result = search(&position, &mut df_pn, &mut evals, false);
         assert_eq!(result.plies(), 7);
     }
 
@@ -399,9 +412,9 @@ mod tests {
         let mut eval = EvalTable::new(1 << 15);
 
         let _mate_result =
-            crate::df_pn::search::df_pn(&mut df_pn, &PositionWrapper::new(position.clone()));
+            crate::df_pn::search::df_pn(&mut df_pn, &PositionWrapper::new(position.clone()), false);
 
-        let result = search(&position, &mut df_pn, &mut eval);
+        let result = search(&position, &mut df_pn, &mut eval, false);
         eprintln!("result = {:?}", result);
         let sequence = find_mate_sequence(&mut df_pn, &mut eval, &position, result);
         let expected = [
