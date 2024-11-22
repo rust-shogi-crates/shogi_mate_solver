@@ -252,7 +252,7 @@ mod tests {
                 to: Square::SQ_2B,
             },
         ];
-        let mut hashes = vec![init_hash; 9];
+        let mut hashes = [init_hash; 9];
         for i in 0..8 {
             position.make_move(moves[i]);
             hashes[i + 1] = position.zobrist_hash();
