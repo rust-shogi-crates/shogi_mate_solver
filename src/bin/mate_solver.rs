@@ -106,6 +106,7 @@ go
         }
     }
     if mate_sequence == "nomate" {
+        child.wait().unwrap();
         return None;
     }
     // Get moves from mate_sequence
@@ -113,6 +114,7 @@ go
     let answer = Position::from_usi(&sfen_moves).unwrap();
     let moves = answer.moves();
     writeln!(stdin, "quit").unwrap();
+    child.wait().unwrap();
     Some(moves.to_vec())
 }
 
