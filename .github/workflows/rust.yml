@@ -2,9 +2,9 @@ name: Rust
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 env:
@@ -14,21 +14,36 @@ env:
 
 jobs:
   build:
+    strategy:
+      matrix:
+        cargo-bloat-version:
+          - "0.12.1"
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
-    - name: cargo version
-      run: cargo --version
-    - name: install nightly
-      run: rustup toolchain install nightly
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose --locked --all --all-features
-    - name: Run clippy
-      run: cargo clippy --all-targets --locked --all
-    - name: Check formatting
-      run: cargo fmt -- --check
-    - name: Document
-      run: cargo doc --verbose
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: "clippy,rustfmt"
+      - name: cargo version
+        run: cargo --version
+      - name: install cargo-bloat (v${{ matrix.cargo-bloat-version }})
+        run: cargo install cargo-bloat --version ${{ matrix.cargo-bloat-version }}
+      - name: Build
+        run: cargo build --verbose
+      - name: Run tests
+        run: cargo test --verbose --locked
+      - name: Run clippy
+        run: cargo clippy --all-targets --locked
+      - name: Check formatting
+        run: cargo fmt -- --check
+      - name: Document
+        run: cargo doc --verbose
+      - name: cargo bloat (display, release)
+        run: |
+          cargo bloat --release --bin mate_solver
+          cargo bloat --release --bin to_sfen
+      - name: cargo bloat (display, per-crate, release)
+        run: |
+          cargo bloat --release --crates --bin mate_solver
+          cargo bloat --release --crates --bin to_sfen
