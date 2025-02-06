@@ -152,14 +152,14 @@ static TABLE: Lazy<ZobristTable> = Lazy::new(|| {
     for v in &mut board {
         for v in v {
             for v in v {
-                *v = rng.gen();
+                *v = rng.random();
             }
         }
     }
     for v in &mut hands {
         for v in v {
             for v in v {
-                *v = rng.gen();
+                *v = rng.random();
             }
         }
     }
