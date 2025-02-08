@@ -1,7 +1,8 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use df_pn::search as dfpnsearch;
 use eval::{search as evalsearch, Value};
+use position_wrapper::PositionWrapper;
 use shogi_core::{Move, PartialPosition};
 use tt::{DfPnTable, EvalTable};
 
@@ -52,56 +53,94 @@ pub struct Eval {
     pub futile: i32,
 }
 
+impl From<Value> for Eval {
+    fn from(value: Value) -> Self {
+        Self {
+            num_moves: value.plies() as i32,
+            pieces: value.pieces() as i32,
+            futile: value.futile() as i32,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Options {
     pub verbose: bool,
 }
 
-fn find_mate_sequence(
+// Returns true if the branch is worth recording.
+fn find_branches(
     df_pn: &mut DfPnTable,
     evals: &mut EvalTable,
-    position: &PartialPosition,
+    position: &PositionWrapper,
     opt: Value,
     opts: &Options,
-) -> Vec<Move> {
-    let mut turn = 0;
-    let mut beta = opt.plies_added_unchecked(1);
-    let mut position = position_wrapper::PositionWrapper::new(position.clone());
-    let mut result = Vec::new();
-    loop {
-        let mut ctx = evalsearch::SearchCtx::default();
-        let (_value, mv) = if turn % 2 == 0 {
-            evalsearch::alpha_beta_me(
-                &position,
-                df_pn,
-                evals,
-                Value::ZERO,
-                beta,
-                &mut BTreeSet::new(),
-                &mut ctx,
-                opts.verbose,
-            )
-        } else {
-            evalsearch::alpha_beta_you(
-                &position,
-                df_pn,
-                evals,
-                Value::ZERO,
-                beta,
-                &mut BTreeSet::new(),
-                &mut ctx,
-                opts.verbose,
-            )
-        };
-        if let Some(mv) = mv {
-            result.push(mv);
-            position.make_move(mv);
-        } else {
-            return result;
-        }
-        turn += 1;
-        beta = beta.plies_added_unchecked(-1);
+    memo: &mut HashMap<Vec<Move>, BranchEntry>,
+    current: Vec<Move>,
+) -> bool {
+    let turn = current.len();
+    if turn > opt.plies() as usize {
+        return false;
     }
+    if turn % 2 == 1 && dfpnsearch::df_pn(df_pn, position, opts.verbose) != (u32::MAX, 0) {
+        return false;
+    }
+    let beta = opt.plies_added_unchecked(turn as i32);
+    let mut ctx = evalsearch::SearchCtx::default();
+    let (value, mv) = if turn % 2 == 0 {
+        evalsearch::alpha_beta_me(
+            position,
+            df_pn,
+            evals,
+            Value::ZERO,
+            beta,
+            &mut BTreeSet::new(),
+            &mut ctx,
+            opts.verbose,
+        )
+    } else {
+        evalsearch::alpha_beta_you(
+            position,
+            df_pn,
+            evals,
+            Value::ZERO,
+            beta,
+            &mut BTreeSet::new(),
+            &mut ctx,
+            opts.verbose,
+        )
+    };
+    let all_moves = if turn % 2 == 0 {
+        let mv = if let Some(mv) = mv { mv } else { return false };
+        vec![mv]
+    } else {
+        let mut tmp = position.all_evasions();
+        if let Some(idx) = tmp.iter().position(|&cmv| Some(cmv) == mv) {
+            tmp.remove(idx);
+        }
+        if let Some(mv) = mv {
+            tmp.insert(0, mv);
+        }
+        tmp
+    };
+    let mut possible_next_moves = vec![];
+    for mv in all_moves {
+        let mut next = current.clone();
+        next.push(mv);
+        let mut next_position = position.clone();
+        next_position.make_move(mv);
+        if find_branches(df_pn, evals, &next_position, opt, opts, memo, next) {
+            possible_next_moves.push(mv);
+        }
+    }
+    let eval = Eval::from(value);
+    let branch_entry = BranchEntry {
+        moves: current.clone(),
+        possible_next_moves,
+        eval: Some(eval),
+    };
+    memo.insert(current, branch_entry);
+    true
 }
 
 pub fn search(position: &PartialPosition, _timeout_ms: u64) -> Answer {
@@ -140,32 +179,20 @@ pub fn search(position: &PartialPosition, _timeout_ms: u64) -> Answer {
             elapsed: 0.0,
         };
     }
-    let sequence = find_mate_sequence(
+    let mut branches_hashmap = HashMap::new();
+    find_branches(
         &mut df_pn,
         &mut eval,
-        position,
+        &position_wrapper::PositionWrapper::new(position.clone()),
         result,
         &Options { verbose },
+        &mut branches_hashmap,
+        vec![],
     );
     let elapsed = 0.0;
     let mut branches = vec![];
-    for i in 0..sequence.len() + 1 {
-        let moves = sequence[0..i].to_vec();
-        // TODO: enumerate all moves
-        let possible_next_moves = if i == sequence.len() {
-            vec![]
-        } else {
-            vec![sequence[i]]
-        };
-        branches.push(BranchEntry {
-            moves,
-            possible_next_moves,
-            eval: Some(Eval {
-                num_moves: (sequence.len() - i) as i32,
-                pieces: 0,
-                futile: 0,
-            }),
-        });
+    for (_moves, branch_entry) in branches_hashmap.iter() {
+        branches.push(branch_entry.clone());
     }
     Answer {
         inner: Ok(OkType {

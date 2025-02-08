@@ -5,7 +5,6 @@ edition = "2021"
 publish = false
 rust-version = "1.74"
 
-
 [dependencies]
 shogi_core = "0.1"
 shogi_usi_parser = "0.1"
