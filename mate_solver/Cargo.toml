@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 once_cell = "1"
-shogi_legality_lite = "0.1.1"
+shogi_legality_lite = "0.1.3"
 shogi_core = { version = "0.1.4", features = ["hash"] }
 rand = "0.9"
 rand_chacha = "0.9"
