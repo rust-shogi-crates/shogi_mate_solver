@@ -19,9 +19,10 @@ impl PositionWrapper {
     }
 
     /// 攻め方の王手の一覧。
-    #[inline(always)]
     pub fn all_checks(&self) -> Vec<Move> {
-        shogi_legality_lite::all_checks_partial(&self.inner)
+        let mut moves = shogi_legality_lite::all_checks_partial(&self.inner);
+        moves.sort_by_key(|mv| !mv.is_promoting()); // promoting moves come first
+        moves
     }
 
     /// 玉方の手の一覧。
