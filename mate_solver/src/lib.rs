@@ -87,7 +87,7 @@ fn find_branches(
     }
     let beta = opt.plies_added_unchecked(turn as i32);
     let mut ctx = evalsearch::SearchCtx::default();
-    let (value, mv) = if turn % 2 == 0 {
+    let (value, mv) = if turn.is_multiple_of(2) {
         evalsearch::alpha_beta_me(
             position,
             df_pn,
@@ -110,7 +110,7 @@ fn find_branches(
             opts.verbose,
         )
     };
-    let all_moves = if turn % 2 == 0 {
+    let all_moves = if turn.is_multiple_of(2) {
         let mv = if let Some(mv) = mv { mv } else { return false };
         vec![mv]
     } else {
