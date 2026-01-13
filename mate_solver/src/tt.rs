@@ -50,7 +50,7 @@ impl<V: Copy> Tt<V> {
         if size <= 3 {
             let newsize = (size + 1) as u8;
             self.sizes[index as usize / 2] &= if index.is_multiple_of(2) { 0xf0 } else { 0x0f };
-            self.sizes[index as usize / 2] |= newsize << (4 * (index % 2));
+            self.sizes[index as usize / 2] |= newsize << (4 * if index.is_multiple_of(2) { 0 } else { 1 });
             pos = size;
         }
 
