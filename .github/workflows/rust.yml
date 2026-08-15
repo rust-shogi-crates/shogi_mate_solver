@@ -49,7 +49,7 @@ jobs:
           git diff origin/${{ github.base_ref }}...HEAD -- Cargo.toml Cargo.lock mate_solver/src/df_pn/search.rs mate_solver/src/eval/search.rs src/bin/benchmark_harness.rs benchmark/issue13-smoke.jsonl > benchmark-output/benchmark-harness.patch
           git -C /tmp/shogi-mate-solver-base apply "${GITHUB_WORKSPACE}/benchmark-output/benchmark-harness.patch"
           cargo run --locked --manifest-path /tmp/shogi-mate-solver-base/Cargo.toml --bin benchmark_harness -- run --strict --revision=base /tmp/shogi-mate-solver-base/benchmark/issue13-smoke.jsonl > benchmark-output/benchmark-base.jsonl
-          cargo run --locked --bin benchmark_harness -- compare --base benchmark-output/benchmark-base.jsonl --current benchmark-output/benchmark-current.jsonl > benchmark-output/benchmark-comparison.jsonl
+          cargo run --locked --bin benchmark_harness -- compare --base benchmark-output/benchmark-base.jsonl --current benchmark-output/benchmark-current.jsonl --html benchmark-output/benchmark-report.html > benchmark-output/benchmark-comparison.jsonl
       - uses: actions/upload-artifact@v7
         if: always() && github.event_name == 'pull_request'
         with:
@@ -58,6 +58,7 @@ jobs:
             benchmark-output/benchmark-base.jsonl
             benchmark-output/benchmark-current.jsonl
             benchmark-output/benchmark-comparison.jsonl
+            benchmark-output/benchmark-report.html
       - name: Document
         run: cargo doc --verbose
       - name: cargo bloat (display, release)

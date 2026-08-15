@@ -42,6 +42,17 @@
       },
       "validation": "rg \"benchmark_harness|JSONL|ratio\" README.md",
       "passes": true
+    },
+    {
+      "id": "add-html-comparison-report",
+      "description": "Add an HTML comparison report for human-friendly benchmark stats.",
+      "boundary": {
+        "files_dirs": ["src/bin/benchmark_harness.rs", ".github/workflows/rust.yml", "README.md"],
+        "semantic_changes": "Add compare --html output with human-readable stats tables, generate it in CI, upload it as an artifact, and document the option.",
+        "capability": "Edit listed files; run cargo fmt, cargo test/check/clippy as needed, smoke compare with --html, and textual workflow/docs checks."
+      },
+      "validation": "cargo run --bin benchmark_harness -- compare --base /tmp/issue13-base.jsonl --current /tmp/issue13-current.jsonl --html /tmp/issue13-report.html && rg \"Benchmark comparison|Ratio\" /tmp/issue13-report.html",
+      "passes": true
     }
   ]
 }

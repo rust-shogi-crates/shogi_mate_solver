@@ -41,9 +41,11 @@ cargo run --bin benchmark_harness -- run --strict --revision=current benchmark/i
 
 比較例:
 ```
-cargo run --bin benchmark_harness -- compare --base benchmark-base.jsonl --current benchmark-current.jsonl
+cargo run --bin benchmark_harness -- compare --base benchmark-base.jsonl --current benchmark-current.jsonl --html benchmark-report.html
 ```
 
 `compare` の `ratio` は `current_elapsed_ms / base_elapsed_ms`。1.0 未満なら current の方が速い。比較結果には `mean`, `median`, `stddev`, `p90`, `p95`, `p99` を含む。df-pn の `proof_number` と `disproof_number` は実装中の phi/delta に対応する。
 
-エラーも同じ JSONL ストリームに出力される。CI では標準出力を `benchmark-base.jsonl`, `benchmark-current.jsonl`, `benchmark-comparison.jsonl` にリダイレクトし、それらを artifacts として保存する。
+`--html` を指定すると、同じ統計を人間が読みやすい HTML レポートにも出力する。
+
+エラーも同じ JSONL ストリームに出力される。CI では標準出力を `benchmark-base.jsonl`, `benchmark-current.jsonl`, `benchmark-comparison.jsonl` にリダイレクトし、`benchmark-report.html` と一緒に artifacts として保存する。

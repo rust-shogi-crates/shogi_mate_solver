@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     env,
-    fs::File,
+    fs::{self, File},
     io::{self, BufRead, BufReader, Write},
     process,
     time::Instant,
@@ -74,6 +74,31 @@ struct CompareTotals {
     inspected_ratios: Vec<f64>,
 }
 
+struct ComparisonSummary {
+    evaluator: String,
+    positions: u64,
+    correct_base: u64,
+    correct_current: u64,
+    elapsed_base: Stats,
+    elapsed_current: Stats,
+    inspected_base: Stats,
+    inspected_current: Stats,
+    ratio: Stats,
+    inspected_ratio: Stats,
+    passed: bool,
+}
+
+#[derive(Clone)]
+struct Stats {
+    total: f64,
+    mean: Option<f64>,
+    median: Option<f64>,
+    stddev: Option<f64>,
+    p90: Option<f64>,
+    p95: Option<f64>,
+    p99: Option<f64>,
+}
+
 fn main() {
     if let Err(()) = run() {
         process::exit(1);
@@ -97,7 +122,9 @@ fn print_usage() {
     eprintln!(
         "  benchmark_harness run [--strict] [--verbose] [--revision=<label>] <positions.jsonl>..."
     );
-    eprintln!("  benchmark_harness compare --base <base.jsonl> --current <current.jsonl>");
+    eprintln!(
+        "  benchmark_harness compare --base <base.jsonl> --current <current.jsonl> [--html <report.html>]"
+    );
 }
 
 fn run_benchmark(args: &[String]) -> Result<(), ()> {
@@ -349,6 +376,7 @@ fn emit_error(source: &str, line: u64, stage: &str, message: String, raw_line: &
 fn compare_outputs(args: &[String]) -> Result<(), ()> {
     let mut base = None;
     let mut current = None;
+    let mut html = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -359,6 +387,10 @@ fn compare_outputs(args: &[String]) -> Result<(), ()> {
             "--current" => {
                 index += 1;
                 current = args.get(index).cloned();
+            }
+            "--html" => {
+                index += 1;
+                html = args.get(index).cloned();
             }
             _ => {
                 print_usage();
@@ -396,6 +428,7 @@ fn compare_outputs(args: &[String]) -> Result<(), ()> {
     );
 
     let mut aggregate = CompareTotals::default();
+    let mut summaries = Vec::new();
     for evaluator in evaluators {
         let mut totals = CompareTotals::default();
         let ids: BTreeSet<_> = base_records
@@ -424,9 +457,22 @@ fn compare_outputs(args: &[String]) -> Result<(), ()> {
             add_pair(&mut totals, base_record, current_record);
             add_pair(&mut aggregate, base_record, current_record);
         }
-        failed |= emit_comparison(&evaluator, &totals);
+        let summary = comparison_summary(&evaluator, &totals);
+        failed |= !summary.passed;
+        emit_comparison(&summary);
+        summaries.push(summary);
     }
-    failed |= emit_comparison("all", &aggregate);
+    let aggregate_summary = comparison_summary("all", &aggregate);
+    failed |= !aggregate_summary.passed;
+    emit_comparison(&aggregate_summary);
+    summaries.push(aggregate_summary);
+
+    if let Some(path) = html {
+        if let Err(error) = write_html_report(&path, &base, &current, &summaries) {
+            emit_compare_error("html", format!("{path}: {error}"));
+            failed = true;
+        }
+    }
 
     if failed { Err(()) } else { Ok(()) }
 }
@@ -532,41 +578,56 @@ fn add_pair(totals: &mut CompareTotals, base: &ResultRecord, current: &ResultRec
     }
 }
 
-fn emit_comparison(evaluator: &str, totals: &CompareTotals) -> bool {
+fn comparison_summary(evaluator: &str, totals: &CompareTotals) -> ComparisonSummary {
     let failed = totals.correct_current < totals.correct_base
         || totals.correct_current < totals.positions
         || totals.positions == 0;
+    ComparisonSummary {
+        evaluator: evaluator.to_owned(),
+        positions: totals.positions,
+        correct_base: totals.correct_base,
+        correct_current: totals.correct_current,
+        elapsed_base: stats(&totals.elapsed_base),
+        elapsed_current: stats(&totals.elapsed_current),
+        inspected_base: stats(&totals.inspected_base),
+        inspected_current: stats(&totals.inspected_current),
+        ratio: stats(&totals.ratios),
+        inspected_ratio: stats(&totals.inspected_ratios),
+        passed: !failed,
+    }
+}
+
+fn emit_comparison(summary: &ComparisonSummary) {
     println!(
         "{}",
         json!({
             "type": "comparison",
-            "evaluator": evaluator,
-            "positions": totals.positions,
-            "correct_base": totals.correct_base,
-            "correct_current": totals.correct_current,
-            "elapsed_ms_base": stats_json(&totals.elapsed_base),
-            "elapsed_ms_current": stats_json(&totals.elapsed_current),
-            "positions_inspected_base": stats_json(&totals.inspected_base),
-            "positions_inspected_current": stats_json(&totals.inspected_current),
-            "ratio": stats_json(&totals.ratios),
-            "positions_inspected_ratio": stats_json(&totals.inspected_ratios),
-            "passed": !failed,
+            "evaluator": &summary.evaluator,
+            "positions": summary.positions,
+            "correct_base": summary.correct_base,
+            "correct_current": summary.correct_current,
+            "elapsed_ms_base": stats_to_json(&summary.elapsed_base),
+            "elapsed_ms_current": stats_to_json(&summary.elapsed_current),
+            "positions_inspected_base": stats_to_json(&summary.inspected_base),
+            "positions_inspected_current": stats_to_json(&summary.inspected_current),
+            "ratio": stats_to_json(&summary.ratio),
+            "positions_inspected_ratio": stats_to_json(&summary.inspected_ratio),
+            "passed": summary.passed,
         })
     );
-    failed
 }
 
-fn stats_json(values: &[f64]) -> JsonValue {
+fn stats(values: &[f64]) -> Stats {
     if values.is_empty() {
-        return json!({
-            "total": 0.0,
-            "mean": null,
-            "median": null,
-            "stddev": null,
-            "p90": null,
-            "p95": null,
-            "p99": null,
-        });
+        return Stats {
+            total: 0.0,
+            mean: None,
+            median: None,
+            stddev: None,
+            p90: None,
+            p95: None,
+            p99: None,
+        };
     }
     let mut sorted = values.to_vec();
     sorted.sort_by(f64::total_cmp);
@@ -580,14 +641,26 @@ fn stats_json(values: &[f64]) -> JsonValue {
         })
         .sum::<f64>()
         / sorted.len() as f64;
+    Stats {
+        total,
+        mean: Some(mean),
+        median: Some(median(&sorted)),
+        stddev: Some(variance.sqrt()),
+        p90: Some(percentile(&sorted, 0.90)),
+        p95: Some(percentile(&sorted, 0.95)),
+        p99: Some(percentile(&sorted, 0.99)),
+    }
+}
+
+fn stats_to_json(stats: &Stats) -> JsonValue {
     json!({
-        "total": total,
-        "mean": mean,
-        "median": median(&sorted),
-        "stddev": variance.sqrt(),
-        "p90": percentile(&sorted, 0.90),
-        "p95": percentile(&sorted, 0.95),
-        "p99": percentile(&sorted, 0.99),
+        "total": stats.total,
+        "mean": stats.mean,
+        "median": stats.median,
+        "stddev": stats.stddev,
+        "p90": stats.p90,
+        "p95": stats.p95,
+        "p99": stats.p99,
     })
 }
 
@@ -615,4 +688,192 @@ fn emit_compare_error(stage: &str, message: String) {
             "message": message,
         })
     );
+}
+
+fn write_html_report(
+    path: &str,
+    base: &str,
+    current: &str,
+    summaries: &[ComparisonSummary],
+) -> io::Result<()> {
+    let mut html = String::new();
+    html.push_str("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">");
+    html.push_str("<title>Benchmark comparison</title>");
+    html.push_str(
+        "<style>
+body{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;margin:2rem;color:#202124;background:#fff}
+h1{font-size:1.6rem;margin:0 0 0.5rem}
+h2{font-size:1.2rem;margin:2rem 0 0.5rem}
+.meta{color:#5f6368;margin-bottom:1.5rem}
+table{border-collapse:collapse;width:100%;margin:0.75rem 0 1.5rem}
+th,td{border:1px solid #dadce0;padding:0.45rem 0.55rem;text-align:right;vertical-align:top}
+th:first-child,td:first-child{text-align:left}
+th{background:#f8fafd;font-weight:600}
+.pass{color:#137333;font-weight:600}
+.fail{color:#a50e0e;font-weight:600}
+.num{font-variant-numeric:tabular-nums}
+</style>",
+    );
+    html.push_str("</head><body>");
+    html.push_str("<h1>Benchmark comparison</h1>");
+    html.push_str("<div class=\"meta\">");
+    html.push_str("Base: <code>");
+    html_escape_into(&mut html, base);
+    html.push_str("</code><br>Current: <code>");
+    html_escape_into(&mut html, current);
+    html.push_str("</code></div>");
+
+    html.push_str("<h2>Summary</h2>");
+    html.push_str("<table><thead><tr><th>Evaluator</th><th>Status</th><th>Positions</th><th>Base correct</th><th>Current correct</th><th>Elapsed ratio mean</th><th>Elapsed ratio median</th><th>Elapsed ratio p95</th><th>Inspected ratio mean</th></tr></thead><tbody>");
+    for summary in summaries {
+        html.push_str("<tr><td>");
+        html_escape_into(&mut html, &summary.evaluator);
+        html.push_str("</td><td class=\"");
+        html.push_str(if summary.passed { "pass" } else { "fail" });
+        html.push_str("\">");
+        html.push_str(if summary.passed { "PASS" } else { "FAIL" });
+        html.push_str("</td><td class=\"num\">");
+        push_u64(&mut html, summary.positions);
+        html.push_str("</td><td class=\"num\">");
+        push_u64(&mut html, summary.correct_base);
+        html.push_str("</td><td class=\"num\">");
+        push_u64(&mut html, summary.correct_current);
+        html.push_str("</td><td class=\"num\">");
+        push_opt_f64(&mut html, summary.ratio.mean);
+        html.push_str("</td><td class=\"num\">");
+        push_opt_f64(&mut html, summary.ratio.median);
+        html.push_str("</td><td class=\"num\">");
+        push_opt_f64(&mut html, summary.ratio.p95);
+        html.push_str("</td><td class=\"num\">");
+        push_opt_f64(&mut html, summary.inspected_ratio.mean);
+        html.push_str("</td></tr>");
+    }
+    html.push_str("</tbody></table>");
+
+    html.push_str("<h2>Elapsed Time</h2>");
+    write_stats_table(
+        &mut html,
+        summaries,
+        "ms",
+        |summary| &summary.elapsed_base,
+        |summary| &summary.elapsed_current,
+    );
+    html.push_str("<h2>Positions Inspected</h2>");
+    write_stats_table(
+        &mut html,
+        summaries,
+        "positions",
+        |summary| &summary.inspected_base,
+        |summary| &summary.inspected_current,
+    );
+    html.push_str("<h2>Ratios</h2>");
+    write_ratio_table(&mut html, summaries);
+    html.push_str("</body></html>\n");
+
+    fs::write(path, html)
+}
+
+fn write_stats_table<FBase, FCurrent>(
+    html: &mut String,
+    summaries: &[ComparisonSummary],
+    unit: &str,
+    base_stats: FBase,
+    current_stats: FCurrent,
+) where
+    FBase: Fn(&ComparisonSummary) -> &Stats,
+    FCurrent: Fn(&ComparisonSummary) -> &Stats,
+{
+    html.push_str("<table><thead><tr><th>Evaluator</th><th>Unit</th><th>Base total</th><th>Current total</th><th>Base mean</th><th>Current mean</th><th>Base median</th><th>Current median</th><th>Base p95</th><th>Current p95</th><th>Base stddev</th><th>Current stddev</th></tr></thead><tbody>");
+    for summary in summaries {
+        let base = base_stats(summary);
+        let current = current_stats(summary);
+        html.push_str("<tr><td>");
+        html_escape_into(html, &summary.evaluator);
+        html.push_str("</td><td>");
+        html_escape_into(html, unit);
+        html.push_str("</td><td class=\"num\">");
+        push_f64(html, base.total);
+        html.push_str("</td><td class=\"num\">");
+        push_f64(html, current.total);
+        html.push_str("</td><td class=\"num\">");
+        push_opt_f64(html, base.mean);
+        html.push_str("</td><td class=\"num\">");
+        push_opt_f64(html, current.mean);
+        html.push_str("</td><td class=\"num\">");
+        push_opt_f64(html, base.median);
+        html.push_str("</td><td class=\"num\">");
+        push_opt_f64(html, current.median);
+        html.push_str("</td><td class=\"num\">");
+        push_opt_f64(html, base.p95);
+        html.push_str("</td><td class=\"num\">");
+        push_opt_f64(html, current.p95);
+        html.push_str("</td><td class=\"num\">");
+        push_opt_f64(html, base.stddev);
+        html.push_str("</td><td class=\"num\">");
+        push_opt_f64(html, current.stddev);
+        html.push_str("</td></tr>");
+    }
+    html.push_str("</tbody></table>");
+}
+
+fn write_ratio_table(html: &mut String, summaries: &[ComparisonSummary]) {
+    html.push_str("<table><thead><tr><th>Evaluator</th><th>Metric</th><th>Mean</th><th>Median</th><th>Stddev</th><th>P90</th><th>P95</th><th>P99</th></tr></thead><tbody>");
+    for summary in summaries {
+        write_ratio_row(html, &summary.evaluator, "Elapsed time", &summary.ratio);
+        write_ratio_row(
+            html,
+            &summary.evaluator,
+            "Positions inspected",
+            &summary.inspected_ratio,
+        );
+    }
+    html.push_str("</tbody></table>");
+}
+
+fn write_ratio_row(html: &mut String, evaluator: &str, metric: &str, stats: &Stats) {
+    html.push_str("<tr><td>");
+    html_escape_into(html, evaluator);
+    html.push_str("</td><td>");
+    html_escape_into(html, metric);
+    html.push_str("</td><td class=\"num\">");
+    push_opt_f64(html, stats.mean);
+    html.push_str("</td><td class=\"num\">");
+    push_opt_f64(html, stats.median);
+    html.push_str("</td><td class=\"num\">");
+    push_opt_f64(html, stats.stddev);
+    html.push_str("</td><td class=\"num\">");
+    push_opt_f64(html, stats.p90);
+    html.push_str("</td><td class=\"num\">");
+    push_opt_f64(html, stats.p95);
+    html.push_str("</td><td class=\"num\">");
+    push_opt_f64(html, stats.p99);
+    html.push_str("</td></tr>");
+}
+
+fn html_escape_into(output: &mut String, input: &str) {
+    for ch in input.chars() {
+        match ch {
+            '&' => output.push_str("&amp;"),
+            '<' => output.push_str("&lt;"),
+            '>' => output.push_str("&gt;"),
+            '"' => output.push_str("&quot;"),
+            '\'' => output.push_str("&#39;"),
+            _ => output.push(ch),
+        }
+    }
+}
+
+fn push_u64(output: &mut String, value: u64) {
+    output.push_str(&value.to_string());
+}
+
+fn push_f64(output: &mut String, value: f64) {
+    output.push_str(&format!("{value:.3}"));
+}
+
+fn push_opt_f64(output: &mut String, value: Option<f64>) {
+    match value {
+        Some(value) => push_f64(output, value),
+        None => output.push('-'),
+    }
 }
