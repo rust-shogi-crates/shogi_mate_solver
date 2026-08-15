@@ -9,7 +9,7 @@
         "capability": "Edit listed files; run cargo fmt, cargo test, and targeted cargo test for mate_solver search modules."
       },
       "validation": "cargo test --package mate_solver",
-      "passes": false
+      "passes": true
     },
     {
       "id": "add-benchmark-binary",
@@ -19,7 +19,7 @@
         "capability": "Edit listed files; run cargo fmt, cargo test, and cargo run for benchmark_harness."
       },
       "validation": "cargo run --bin benchmark_harness -- run --revision=current benchmark/issue13-smoke.jsonl",
-      "passes": false
+      "passes": true
     },
     {
       "id": "add-ci-comparison",
@@ -30,7 +30,7 @@
         "capability": "Edit listed file for benchmark comparison only; run textual workflow inspection."
       },
       "validation": "rg \"benchmark_harness|fetch-depth|upload-artifact|benchmark-.*jsonl\" .github/workflows/rust.yml",
-      "passes": false
+      "passes": true
     },
     {
       "id": "document-benchmark-harness",
@@ -41,7 +41,7 @@
         "capability": "Edit README.md; inspect rendered markdown textually."
       },
       "validation": "rg \"benchmark_harness|JSONL|ratio\" README.md",
-      "passes": false
+      "passes": true
     }
   ]
 }

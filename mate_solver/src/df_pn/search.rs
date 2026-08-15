@@ -29,6 +29,11 @@ pub struct SearchCtx {
     seq: Vec<Move>,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SearchStats {
+    pub positions_inspected: u64,
+}
+
 impl SearchCtx {
     pub fn push(&mut self, mv: Move) {
         self.seq.push(mv);
@@ -52,7 +57,17 @@ impl core::fmt::Debug for SearchCtx {
 
 // ルートでの反復深化
 pub fn df_pn(dfpn_tbl: &mut DfPnTable, position: &PositionWrapper, verbose: bool) -> (u32, u32) {
-    let (phi_now, delta_now) = mid(
+    df_pn_with_stats(dfpn_tbl, position, verbose, &mut SearchStats::default())
+}
+
+// Root iterative deepening with stats collection.
+pub fn df_pn_with_stats(
+    dfpn_tbl: &mut DfPnTable,
+    position: &PositionWrapper,
+    verbose: bool,
+    stats: &mut SearchStats,
+) -> (u32, u32) {
+    let (phi_now, delta_now) = mid_with_stats(
         dfpn_tbl,
         position,
         (u32::MAX - 1, u32::MAX - 1),
@@ -60,12 +75,13 @@ pub fn df_pn(dfpn_tbl: &mut DfPnTable, position: &PositionWrapper, verbose: bool
         true,
         &mut Default::default(),
         verbose,
+        stats,
     );
     // ループを見つけてしまった
     if phi_now != u32::MAX && delta_now != u32::MAX {
         eprintln!("! loop found: {} {}", phi_now, delta_now);
         dfpn_tbl.clear();
-        return mid(
+        return mid_with_stats(
             dfpn_tbl,
             position,
             (u32::MAX, u32::MAX),
@@ -73,6 +89,7 @@ pub fn df_pn(dfpn_tbl: &mut DfPnTable, position: &PositionWrapper, verbose: bool
             false,
             &mut Default::default(),
             verbose,
+            stats,
         );
     }
     (phi_now, delta_now)
@@ -83,12 +100,37 @@ pub fn df_pn(dfpn_tbl: &mut DfPnTable, position: &PositionWrapper, verbose: bool
 pub fn mid(
     dfpn_tbl: &mut DfPnTable,
     position: &PositionWrapper,
-    (mut phi_now, mut delta_now): (u32, u32),
+    (phi_now, delta_now): (u32, u32),
     node_kind: NodeKind,
     allow_loop: bool,
     ctx: &mut SearchCtx,
     verbose: bool,
 ) -> (u32, u32) {
+    mid_with_stats(
+        dfpn_tbl,
+        position,
+        (phi_now, delta_now),
+        node_kind,
+        allow_loop,
+        ctx,
+        verbose,
+        &mut SearchStats::default(),
+    )
+}
+
+// Expands a node and returns updated proof/disproof numbers.
+#[allow(clippy::too_many_arguments)]
+pub fn mid_with_stats(
+    dfpn_tbl: &mut DfPnTable,
+    position: &PositionWrapper,
+    (mut phi_now, mut delta_now): (u32, u32),
+    node_kind: NodeKind,
+    allow_loop: bool,
+    ctx: &mut SearchCtx,
+    verbose: bool,
+    stats: &mut SearchStats,
+) -> (u32, u32) {
+    stats.positions_inspected += 1;
     if ctx.seq.len() >= 50 {
         panic!();
     }
@@ -180,7 +222,7 @@ pub fn mid(
         let mut next = position.clone();
         next.make_move(mv);
         ctx.push(mv);
-        mid(
+        mid_with_stats(
             dfpn_tbl,
             &next,
             (phi_n_c, delta_n_c),
@@ -188,6 +230,7 @@ pub fn mid(
             allow_loop,
             ctx,
             verbose,
+            stats,
         );
         ctx.pop();
     }
