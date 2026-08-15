@@ -36,7 +36,7 @@ benchmark_harness は JSONL の局面リストを読み、df-pn と eval の結�
 
 実行例:
 ```
-cargo run -p benchmark_harness -- run --strict --revision=current benchmark/issue13-smoke.jsonl
+cargo run -p benchmark_harness -- run --strict --revision=current benchmark/issue13-ci.jsonl
 ```
 
 比較例:

@@ -38,8 +38,8 @@ Comparison output will also include detailed descriptive statistics for base ela
 - `.github/workflows/rust.yml`
   - Add an automatic benchmark comparison job/step for PRs.
   - Upload generated base/current/comparison JSONL files as workflow artifacts.
-- `benchmark/issue13-smoke.jsonl`
-  - Add a tiny deterministic position set for CI smoke comparison, including expected answers.
+- `benchmark/issue13-ci.jsonl`
+  - Add a tiny deterministic position set for CI comparison, including expected answers.
 - `README.md`
   - Document the harness invocation, accepted JSONL schema, and output records.
 
@@ -71,7 +71,7 @@ The harness prints JSONL to stdout. In CI, stdout will be redirected to files su
 First record:
 
 ```json
-{"type":"metadata","mode":"run","revision":"current","inputs":["benchmark/issue13-smoke.jsonl"]}
+{"type":"metadata","mode":"run","revision":"current","inputs":["benchmark/issue13-ci.jsonl"]}
 ```
 
 For a single-revision run, metadata identifies the run mode, the caller-supplied revision label, and input files. It avoids embedding a human diff stat because that is not useful for machine comparison.
@@ -126,7 +126,7 @@ Comparison summary record:
    - Emit per-evaluator and aggregate comparison records with `ratio = current_elapsed_ms / base_elapsed_ms`.
    - Include mean, median, standard deviation, and percentile stats (`p90`, `p95`, `p99`) for elapsed times, inspected-position counts, and ratios.
    - Exit nonzero if current correctness is lower than base or any current record is incorrect against an expected answer.
-6. Add `benchmark/issue13-smoke.jsonl` with a tiny expected-answer dataset from existing unit-test positions.
+6. Add `benchmark/issue13-ci.jsonl` with a tiny expected-answer dataset from existing unit-test positions.
 7. Update `.github/workflows/rust.yml`:
    - Ensure checkout fetches enough history to access the PR base.
    - Build/run the base revision harness into a JSONL file.
@@ -153,7 +153,7 @@ Comparison summary record:
 - `origin/HEAD` must exist locally. The harness will degrade gracefully if the diff command fails.
 - Search runtimes may be noisy; the harness reports elapsed wall time but does not attempt statistical benchmarking.
 - Adding `serde_json` changes `Cargo.lock`.
-- Building and running two revisions in CI can be slower than the current workflow. The smoke dataset must stay intentionally tiny.
+- Building and running two revisions in CI can be slower than the current workflow. The CI dataset must stay intentionally tiny.
 - Exact "positions inspected" may require threading a stats object through recursive search functions. This is a small signature change, but it touches core search code.
 - CI edits should stay focused on the benchmark comparison.
 
@@ -162,21 +162,21 @@ Comparison summary record:
 - Formatting is covered by pre-commit hooks; still run the local formatter/check as needed while iterating.
 - `cargo fmt --check`
 - `cargo test`
-- Manual smoke test with `benchmark/issue13-smoke.jsonl` containing:
+- Manual CI fixture test with `benchmark/issue13-ci.jsonl` containing:
   - An object line with one known mate SFEN from existing tests.
   - Expected answer fields.
-- Temporary invalid-line smoke test to verify error records include `raw_line` and the process exits nonzero after emitting failures.
+- Temporary invalid-line sanity check to verify error records include `raw_line` and the process exits nonzero after emitting failures.
 - Inspect CI YAML textually to verify generated JSONL files are uploaded as artifacts.
 - Run:
-  - `cargo run --bin benchmark_harness -- run --revision=current benchmark/issue13-smoke.jsonl`
-  - `cargo run --bin benchmark_harness -- compare --base /tmp/base.jsonl --current /tmp/current.jsonl`
+  - `cargo run -p benchmark_harness -- run --revision=current benchmark/issue13-ci.jsonl`
+  - `cargo run -p benchmark_harness -- compare --base /tmp/base.jsonl --current /tmp/current.jsonl`
 
 ## Assumptions
 
 - Plan approval includes approval to add `serde_json` as the JSON parser dependency.
 - The harness is intended for local branch benchmarking, not for downloading benchmark position datasets.
 - The initial JSONL schema can be minimal because the issue explicitly says the schema is undefined.
-- CI comparison can use a very small bundled smoke dataset; larger benchmark suites can be supplied later without changing the harness.
+- CI comparison can use a very small bundled CI dataset; larger benchmark suites can be supplied later without changing the harness.
 - `origin/HEAD` comparison in CI means "run the base revision and current revision separately, then compare JSONL outputs", not "emit a git diff stat".
 - Plans and docs should avoid machine-specific worktree paths because those paths are not meaningful on GitHub.
 
