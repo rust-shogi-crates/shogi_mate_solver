@@ -77,7 +77,7 @@ pub fn search_with_stats(
         df_pn,
         evals,
         Value::ZERO,
-        Value::new(12, 0, 0),
+        Value::new(40, 0, 0),
         &mut BTreeSet::new(),
         &mut Default::default(),
         verbose,
