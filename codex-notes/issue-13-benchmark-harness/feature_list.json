@@ -75,6 +75,17 @@
       },
       "validation": "rg \"Run benchmark comparison|benchmark-report.html|upload-artifact\" .github/workflows/benchmark.yml && ! rg \"Run benchmark comparison|benchmark-report.html|upload-artifact\" .github/workflows/rust.yml",
       "passes": true
+    },
+    {
+      "id": "release-mode-benchmark-ci",
+      "description": "Run benchmark harness measurements in release mode in CI.",
+      "boundary": {
+        "files_dirs": [".github/workflows/benchmark.yml"],
+        "semantic_changes": "Use release-mode cargo run commands for benchmark measurement and comparison in the dedicated benchmark workflow.",
+        "capability": "Edit listed workflow file only; run YAML/pre-commit checks and textual workflow inspection."
+      },
+      "validation": "rg \"cargo run --release --locked\" .github/workflows/benchmark.yml",
+      "passes": true
     }
   ]
 }
