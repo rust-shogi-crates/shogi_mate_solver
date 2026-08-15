@@ -1,0 +1,47 @@
+{
+  "features": [
+    {
+      "id": "instrument-search-stats",
+      "description": "Expose positions-inspected counters for df_pn and eval searches.",
+      "boundary": {
+        "files_dirs": ["mate_solver/src/df_pn/search.rs", "mate_solver/src/eval/search.rs"],
+        "semantic_changes": "Add optional stats collection for inspected positions without changing existing search results.",
+        "capability": "Edit listed files; run cargo fmt, cargo test, and targeted cargo test for mate_solver search modules."
+      },
+      "validation": "cargo test --package mate_solver",
+      "passes": false
+    },
+    {
+      "id": "add-benchmark-binary",
+      "boundary": {
+        "files_dirs": ["Cargo.toml", "Cargo.lock", "src/bin/benchmark_harness.rs", "benchmark/issue13-smoke.jsonl"],
+        "semantic_changes": "Add serde_json dependency, new binary target, object-only JSONL parsing, expected-answer checking, per-revision run mode, compare mode, timing ratio distribution stats, raw-line error records, and smoke dataset.",
+        "capability": "Edit listed files; run cargo fmt, cargo test, and cargo run for benchmark_harness."
+      },
+      "validation": "cargo run --bin benchmark_harness -- run --revision=current benchmark/issue13-smoke.jsonl",
+      "passes": false
+    },
+    {
+      "id": "add-ci-comparison",
+      "description": "Update GitHub Actions to compare origin/HEAD and current-branch benchmark results.",
+      "boundary": {
+        "files_dirs": [".github/workflows/rust.yml"],
+        "semantic_changes": "Add PR benchmark comparison steps and upload generated JSONL files as workflow artifacts.",
+        "capability": "Edit listed file for benchmark comparison only; run textual workflow inspection."
+      },
+      "validation": "rg \"benchmark_harness|fetch-depth|upload-artifact|benchmark-.*jsonl\" .github/workflows/rust.yml",
+      "passes": false
+    },
+    {
+      "id": "document-benchmark-harness",
+      "description": "Document benchmark_harness usage, accepted JSONL schema, comparison ratio, and output record shape.",
+      "boundary": {
+        "files_dirs": ["README.md"],
+        "semantic_changes": "Add a concise benchmark_harness documentation section covering schema, df-pn proof/disproof names, ratio stats, and output records without changing existing mate_solver/to_sfen behavior documentation.",
+        "capability": "Edit README.md; inspect rendered markdown textually."
+      },
+      "validation": "rg \"benchmark_harness|JSONL|ratio\" README.md",
+      "passes": false
+    }
+  ]
+}
