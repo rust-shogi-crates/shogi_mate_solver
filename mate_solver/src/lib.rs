@@ -191,7 +191,7 @@ pub fn search(position: &PartialPosition, _timeout_ms: u64) -> Answer {
     );
     let elapsed = 0.0;
     let mut branches = vec![];
-    for (_moves, branch_entry) in branches_hashmap.iter() {
+    for branch_entry in branches_hashmap.values() {
         branches.push(branch_entry.clone());
     }
     Answer {
