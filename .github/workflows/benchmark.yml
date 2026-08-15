@@ -36,6 +36,7 @@ jobs:
         if: always()
         with:
           name: benchmark-harness-results
+          compression-level: 9
           path: |
             benchmark-output/benchmark-base.jsonl
             benchmark-output/benchmark-current.jsonl
