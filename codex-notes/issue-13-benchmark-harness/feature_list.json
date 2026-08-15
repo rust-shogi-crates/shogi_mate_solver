@@ -91,7 +91,7 @@
       "id": "rename-ci-fixture",
       "description": "Rename the bundled benchmark fixture to issue13-ci.jsonl.",
       "boundary": {
-        "files_dirs": ["benchmark/issue13-ci.jsonl", "benchmark/", ".github/workflows/benchmark.yml", "README.md", "codex-notes/issue-13-benchmark-harness/plan.md", "codex-notes/issue-13-benchmark-harness/feature_list.json"],
+        "files_dirs": ["benchmark", ".github/workflows/benchmark.yml", "README.md", "codex-notes/issue-13-benchmark-harness/plan.md", "codex-notes/issue-13-benchmark-harness/feature_list.json"],
         "semantic_changes": "Use the clearer issue13-ci.jsonl fixture name and remove unclear fixture-name wording from user-facing references.",
         "capability": "Edit/rename listed files; run formatting, YAML check, grep for stale names, and benchmark harness fixture run."
       },
