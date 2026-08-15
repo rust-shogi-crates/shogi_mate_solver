@@ -25,4 +25,4 @@ path = "src/bin/to_sfen.rs"
 debug = false
 
 [workspace]
-members = ["mate_solver"]
+members = ["mate_solver", "benchmark_harness"]

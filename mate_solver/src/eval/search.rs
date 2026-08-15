@@ -15,6 +15,11 @@ pub struct SearchCtx {
     seq: Vec<Move>,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SearchStats {
+    pub positions_inspected: u64,
+}
+
 impl SearchCtx {
     pub fn push(&mut self, mv: Move) {
         self.seq.push(mv);
@@ -49,7 +54,25 @@ pub fn search(
     evals: &mut EvalTable,
     verbose: bool,
 ) -> Value {
-    alpha_beta_me(
+    search_with_stats(
+        position,
+        df_pn,
+        evals,
+        verbose,
+        &mut SearchStats::default(),
+        &mut crate::df_pn::search::SearchStats::default(),
+    )
+}
+
+pub fn search_with_stats(
+    position: &PartialPosition,
+    df_pn: &mut DfPnTable,
+    evals: &mut EvalTable,
+    verbose: bool,
+    stats: &mut SearchStats,
+    df_pn_stats: &mut crate::df_pn::search::SearchStats,
+) -> Value {
+    alpha_beta_me_with_stats(
         &PositionWrapper::new(position.clone()),
         df_pn,
         evals,
@@ -58,6 +81,8 @@ pub fn search(
         &mut BTreeSet::new(),
         &mut Default::default(),
         verbose,
+        stats,
+        df_pn_stats,
     )
     .0
 }
@@ -69,11 +94,40 @@ pub fn alpha_beta_me(
     df_pn: &mut DfPnTable,
     evals: &mut EvalTable,
     alpha: Value,
-    mut beta: Value,
+    beta: Value,
     seen: &mut BTreeSet<Key>,
     ctx: &mut SearchCtx,
     verbose: bool,
 ) -> (Value, Option<Move>) {
+    alpha_beta_me_with_stats(
+        position,
+        df_pn,
+        evals,
+        alpha,
+        beta,
+        seen,
+        ctx,
+        verbose,
+        &mut SearchStats::default(),
+        &mut crate::df_pn::search::SearchStats::default(),
+    )
+}
+
+// Searches attacker moves with stats collection.
+#[allow(clippy::too_many_arguments)]
+pub fn alpha_beta_me_with_stats(
+    position: &PositionWrapper,
+    df_pn: &mut DfPnTable,
+    evals: &mut EvalTable,
+    alpha: Value,
+    mut beta: Value,
+    seen: &mut BTreeSet<Key>,
+    ctx: &mut SearchCtx,
+    verbose: bool,
+    stats: &mut SearchStats,
+    df_pn_stats: &mut crate::df_pn::search::SearchStats,
+) -> (Value, Option<Move>) {
+    stats.positions_inspected += 1;
     if beta.plies() == 0 {
         // 0 手で詰ますことはできない。攻め方にとって最悪の評価値を返す。
         return (Value::INF, None);
@@ -86,7 +140,7 @@ pub fn alpha_beta_me(
     }
     // df_pn で簡単に不詰が読み切れるのであればそうする
     if beta.plies() >= 3 {
-        let mate_result = crate::df_pn::search::mid(
+        let mate_result = crate::df_pn::search::mid_with_stats(
             df_pn,
             position,
             (10, 10),
@@ -94,6 +148,7 @@ pub fn alpha_beta_me(
             false,
             &mut Default::default(),
             verbose,
+            df_pn_stats,
         );
         if mate_result == (u32::MAX, 0) {
             // 不詰を読み切れたので攻め方にとって最悪の評価値を返す。
@@ -142,7 +197,19 @@ pub fn alpha_beta_me(
         let mut next = position.clone();
         next.make_move(mv);
         ctx.push(mv);
-        let eval = alpha_beta_you(&next, df_pn, evals, new_alpha, new_beta, seen, ctx, verbose).0;
+        let eval = alpha_beta_you_with_stats(
+            &next,
+            df_pn,
+            evals,
+            new_alpha,
+            new_beta,
+            seen,
+            ctx,
+            verbose,
+            stats,
+            df_pn_stats,
+        )
+        .0;
         ctx.pop();
         let eval = eval.plies_added_unchecked(1);
         if eval < beta {
@@ -180,12 +247,41 @@ pub fn alpha_beta_you(
     position: &PositionWrapper,
     df_pn: &mut DfPnTable,
     evals: &mut EvalTable,
-    mut alpha: Value,
+    alpha: Value,
     beta: Value,
     seen: &mut BTreeSet<Key>,
     ctx: &mut SearchCtx,
     verbose: bool,
 ) -> (Value, Option<Move>) {
+    alpha_beta_you_with_stats(
+        position,
+        df_pn,
+        evals,
+        alpha,
+        beta,
+        seen,
+        ctx,
+        verbose,
+        &mut SearchStats::default(),
+        &mut crate::df_pn::search::SearchStats::default(),
+    )
+}
+
+// Searches defender moves with stats collection.
+#[allow(clippy::too_many_arguments)]
+pub fn alpha_beta_you_with_stats(
+    position: &PositionWrapper,
+    df_pn: &mut DfPnTable,
+    evals: &mut EvalTable,
+    mut alpha: Value,
+    beta: Value,
+    seen: &mut BTreeSet<Key>,
+    ctx: &mut SearchCtx,
+    verbose: bool,
+    stats: &mut SearchStats,
+    df_pn_stats: &mut crate::df_pn::search::SearchStats,
+) -> (Value, Option<Move>) {
+    stats.positions_inspected += 1;
     if let Some((dn, pn)) = df_pn.fetch(position.zobrist_hash()) {
         if (pn, dn) == (u32::MAX, 0) {
             // もう詰まないことが分かっている。攻め方にとって最悪の評価値を返す。
@@ -253,7 +349,19 @@ pub fn alpha_beta_you(
         let mut next = position.clone();
         next.make_move(mv);
         ctx.push(mv);
-        let eval = alpha_beta_me(&next, df_pn, evals, new_alpha, new_beta, seen, ctx, verbose).0;
+        let eval = alpha_beta_me_with_stats(
+            &next,
+            df_pn,
+            evals,
+            new_alpha,
+            new_beta,
+            seen,
+            ctx,
+            verbose,
+            stats,
+            df_pn_stats,
+        )
+        .0;
         ctx.pop();
         let eval = eval.plies_added_unchecked(1);
         if eval > alpha {

@@ -1,0 +1,102 @@
+{
+  "features": [
+    {
+      "id": "instrument-search-stats",
+      "description": "Expose positions-inspected counters for df_pn and eval searches.",
+      "boundary": {
+        "files_dirs": ["mate_solver/src/df_pn/search.rs", "mate_solver/src/eval/search.rs"],
+        "semantic_changes": "Add optional stats collection for inspected positions without changing existing search results.",
+        "capability": "Edit listed files; run cargo fmt, cargo test, and targeted cargo test for mate_solver search modules."
+      },
+      "validation": "cargo test --package mate_solver",
+      "passes": true
+    },
+    {
+      "id": "add-benchmark-binary",
+      "boundary": {
+        "files_dirs": ["Cargo.toml", "Cargo.lock", "src/bin/benchmark_harness.rs", "benchmark/issue13-ci.jsonl"],
+        "semantic_changes": "Add serde_json dependency, new binary target, object-only JSONL parsing, expected-answer checking, per-revision run mode, compare mode, timing ratio distribution stats, raw-line error records, and CI dataset.",
+        "capability": "Edit listed files; run cargo fmt, cargo test, and cargo run for benchmark_harness."
+      },
+      "validation": "cargo run --bin benchmark_harness -- run --revision=current benchmark/issue13-ci.jsonl",
+      "passes": true
+    },
+    {
+      "id": "add-ci-comparison",
+      "description": "Update GitHub Actions to compare origin/HEAD and current-branch benchmark results.",
+      "boundary": {
+        "files_dirs": [".github/workflows/rust.yml"],
+        "semantic_changes": "Add PR benchmark comparison steps and upload generated JSONL files as workflow artifacts.",
+        "capability": "Edit listed file for benchmark comparison only; run textual workflow inspection."
+      },
+      "validation": "rg \"benchmark_harness|fetch-depth|upload-artifact|benchmark-.*jsonl\" .github/workflows/rust.yml",
+      "passes": true
+    },
+    {
+      "id": "document-benchmark-harness",
+      "description": "Document benchmark_harness usage, accepted JSONL schema, comparison ratio, and output record shape.",
+      "boundary": {
+        "files_dirs": ["README.md"],
+        "semantic_changes": "Add a concise benchmark_harness documentation section covering schema, df-pn proof/disproof names, ratio stats, and output records without changing existing mate_solver/to_sfen behavior documentation.",
+        "capability": "Edit README.md; inspect rendered markdown textually."
+      },
+      "validation": "rg \"benchmark_harness|JSONL|ratio\" README.md",
+      "passes": true
+    },
+    {
+      "id": "add-html-comparison-report",
+      "description": "Add an HTML comparison report for human-friendly benchmark stats.",
+      "boundary": {
+        "files_dirs": ["src/bin/benchmark_harness.rs", ".github/workflows/rust.yml", "README.md"],
+        "semantic_changes": "Add compare --html output with human-readable stats tables, generate it in CI, upload it as an artifact, and document the option.",
+        "capability": "Edit listed files; run cargo fmt, cargo test/check/clippy as needed, CI fixture compare with --html, and textual workflow/docs checks."
+      },
+      "validation": "cargo run --bin benchmark_harness -- compare --base /tmp/issue13-base.jsonl --current /tmp/issue13-current.jsonl --html /tmp/issue13-report.html && rg \"Benchmark comparison|Ratio\" /tmp/issue13-report.html",
+      "passes": true
+    },
+    {
+      "id": "move-benchmark-harness-crate",
+      "description": "Move benchmark_harness from the root package binary into a dedicated workspace crate.",
+      "boundary": {
+        "files_dirs": ["Cargo.toml", "Cargo.lock", "benchmark_harness/", "src/bin/benchmark_harness.rs", ".github/workflows/rust.yml", "README.md"],
+        "semantic_changes": "Make benchmark_harness its own workspace member, remove serde_json from the root package, update commands and CI to use the package target.",
+        "capability": "Edit/move listed files; run cargo fmt/check/test/clippy, benchmark harness CI fixture commands, release build, and textual workflow/docs checks."
+      },
+      "validation": "cargo run -p benchmark_harness -- run --strict --revision=current benchmark/issue13-ci.jsonl && cargo run -p benchmark_harness -- compare --base /tmp/issue13-base.jsonl --current /tmp/issue13-current.jsonl --html /tmp/issue13-report.html",
+      "passes": true
+    },
+    {
+      "id": "split-benchmark-workflow",
+      "description": "Move benchmark comparison CI into its own workflow file.",
+      "boundary": {
+        "files_dirs": [".github/workflows/rust.yml", ".github/workflows/benchmark.yml"],
+        "semantic_changes": "Remove benchmark comparison and artifact upload from the Rust workflow, add a dedicated benchmark workflow with equivalent PR benchmark behavior.",
+        "capability": "Edit listed workflow files only; run YAML/pre-commit checks and textual workflow inspection."
+      },
+      "validation": "rg \"Run benchmark comparison|benchmark-report.html|upload-artifact\" .github/workflows/benchmark.yml && ! rg \"Run benchmark comparison|benchmark-report.html|upload-artifact\" .github/workflows/rust.yml",
+      "passes": true
+    },
+    {
+      "id": "release-mode-benchmark-ci",
+      "description": "Run benchmark harness measurements in release mode in CI.",
+      "boundary": {
+        "files_dirs": [".github/workflows/benchmark.yml"],
+        "semantic_changes": "Use release-mode cargo run commands for benchmark measurement and comparison in the dedicated benchmark workflow.",
+        "capability": "Edit listed workflow file only; run YAML/pre-commit checks and textual workflow inspection."
+      },
+      "validation": "rg \"cargo run --release --locked\" .github/workflows/benchmark.yml",
+      "passes": true
+    },
+    {
+      "id": "rename-ci-fixture",
+      "description": "Rename the bundled benchmark fixture to issue13-ci.jsonl.",
+      "boundary": {
+        "files_dirs": ["benchmark", ".github/workflows/benchmark.yml", "README.md", "codex-notes/issue-13-benchmark-harness/plan.md", "codex-notes/issue-13-benchmark-harness/feature_list.json"],
+        "semantic_changes": "Use the clearer issue13-ci.jsonl fixture name and remove unclear fixture-name wording from user-facing references.",
+        "capability": "Edit/rename listed files; run formatting, YAML check, grep for stale names, and benchmark harness fixture run."
+      },
+      "validation": "cargo run -p benchmark_harness -- run --strict --revision=current benchmark/issue13-ci.jsonl && rg \"issue13-ci.jsonl\" .github README.md benchmark codex-notes/issue-13-benchmark-harness",
+      "passes": true
+    }
+  ]
+}
