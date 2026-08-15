@@ -21,11 +21,13 @@ jobs:
       - name: cargo version
         run: cargo --version
       - name: Run benchmark comparison
+        env:
+          BENCHMARK_BASE_REF: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           mkdir -p benchmark-output
           cargo run --release --locked -p benchmark_harness -- run --strict --revision=current benchmark/issue13-ci.jsonl > benchmark-output/benchmark-current.jsonl
-          git worktree add /tmp/shogi-mate-solver-base origin/HEAD
+          git worktree add /tmp/shogi-mate-solver-base origin/${BENCHMARK_BASE_REF}
           cargo run --release --locked --manifest-path /tmp/shogi-mate-solver-base/Cargo.toml -p benchmark_harness -- run --strict --revision=base /tmp/shogi-mate-solver-base/benchmark/issue13-ci.jsonl > benchmark-output/benchmark-base.jsonl
           cargo run --release --locked -p benchmark_harness -- compare --base benchmark-output/benchmark-base.jsonl --current benchmark-output/benchmark-current.jsonl --html benchmark-output/benchmark-report.html > benchmark-output/benchmark-comparison.jsonl
       - uses: actions/upload-artifact@v7
