@@ -3,6 +3,16 @@
 version = 4
 
 [[package]]
+name = "benchmark_harness"
+version = "0.1.0"
+dependencies = [
+ "mate_solver",
+ "serde_json",
+ "shogi_core",
+ "shogi_usi_parser",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -383,7 +393,6 @@ version = "0.1.0"
 dependencies = [
  "encoding_rs",
  "mate_solver",
- "serde_json",
  "shogi_core",
  "shogi_official_kifu",
  "shogi_usi_parser",

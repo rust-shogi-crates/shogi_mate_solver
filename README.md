@@ -36,12 +36,12 @@ benchmark_harness は JSONL の局面リストを読み、df-pn と eval の結�
 
 実行例:
 ```
-cargo run --bin benchmark_harness -- run --strict --revision=current benchmark/issue13-smoke.jsonl
+cargo run -p benchmark_harness -- run --strict --revision=current benchmark/issue13-smoke.jsonl
 ```
 
 比較例:
 ```
-cargo run --bin benchmark_harness -- compare --base benchmark-base.jsonl --current benchmark-current.jsonl --html benchmark-report.html
+cargo run -p benchmark_harness -- compare --base benchmark-base.jsonl --current benchmark-current.jsonl --html benchmark-report.html
 ```
 
 `compare` の `ratio` は `current_elapsed_ms / base_elapsed_ms`。1.0 未満なら current の方が速い。比較結果には `mean`, `median`, `stddev`, `p90`, `p95`, `p99` を含む。df-pn の `proof_number` と `disproof_number` は実装中の phi/delta に対応する。

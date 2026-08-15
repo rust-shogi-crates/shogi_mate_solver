@@ -1,0 +1,12 @@
+[package]
+name = "benchmark_harness"
+version = "0.1.0"
+edition = "2024"
+publish = false
+rust-version = "1.85"
+
+[dependencies]
+mate_solver = { path = "../mate_solver" }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+shogi_core = "0.1"
+shogi_usi_parser = "0.1"

@@ -53,6 +53,17 @@
       },
       "validation": "cargo run --bin benchmark_harness -- compare --base /tmp/issue13-base.jsonl --current /tmp/issue13-current.jsonl --html /tmp/issue13-report.html && rg \"Benchmark comparison|Ratio\" /tmp/issue13-report.html",
       "passes": true
+    },
+    {
+      "id": "move-benchmark-harness-crate",
+      "description": "Move benchmark_harness from the root package binary into a dedicated workspace crate.",
+      "boundary": {
+        "files_dirs": ["Cargo.toml", "Cargo.lock", "benchmark_harness/", "src/bin/benchmark_harness.rs", ".github/workflows/rust.yml", "README.md"],
+        "semantic_changes": "Make benchmark_harness its own workspace member, remove serde_json from the root package, update commands and CI to use the package target.",
+        "capability": "Edit/move listed files; run cargo fmt/check/test/clippy, benchmark harness smoke commands, release build, and textual workflow/docs checks."
+      },
+      "validation": "cargo run -p benchmark_harness -- run --strict --revision=current benchmark/issue13-smoke.jsonl && cargo run -p benchmark_harness -- compare --base /tmp/issue13-base.jsonl --current /tmp/issue13-current.jsonl --html /tmp/issue13-report.html",
+      "passes": true
     }
   ]
 }
