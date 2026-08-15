@@ -1,0 +1,31 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # frozen: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-merge-conflict
+
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --all -- --check
+        entry: cargo fmt --all -- --check
+        language: system
+        pass_filenames: false
+        files: '^(src/|mate_solver/src/|Cargo\.(toml|lock)|mate_solver/Cargo\.toml)'
+
+      - id: cargo-check
+        name: cargo check --all-targets --all --locked
+        entry: cargo check --all-targets --all --locked
+        language: system
+        pass_filenames: false
+        files: '^(src/|mate_solver/src/|Cargo\.(toml|lock)|mate_solver/Cargo\.toml)'
+
+      - id: cargo-clippy
+        name: cargo clippy --all-targets --all-features --locked
+        entry: cargo clippy --all-targets --all-features --locked -- -D warnings
+        language: system
+        pass_filenames: false
+        files: '^(src/|mate_solver/src/|Cargo\.(toml|lock)|mate_solver/Cargo\.toml)'

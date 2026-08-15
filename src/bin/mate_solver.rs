@@ -2,13 +2,13 @@ use std::{
     collections::BTreeSet,
     env::args,
     io::Write,
-    io::{stdin, BufRead, BufReader},
+    io::{BufRead, BufReader, stdin},
     process::{Command, Stdio},
 };
 
 use mate_solver::df_pn::search as dfpnsearch;
-use mate_solver::eval::search as evalsearch;
 use mate_solver::eval::Value;
+use mate_solver::eval::search as evalsearch;
 use mate_solver::position_wrapper::PositionWrapper;
 use mate_solver::tt::{DfPnTable, EvalTable};
 use shogi_core::{Move, PartialPosition, Position, ToUsi};
