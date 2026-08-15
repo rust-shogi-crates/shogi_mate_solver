@@ -39,26 +39,6 @@ jobs:
         run: cargo clippy --all-targets --locked
       - name: Check formatting
         run: cargo fmt -- --check
-      - name: Run benchmark comparison
-        if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          mkdir -p benchmark-output
-          cargo run --locked -p benchmark_harness -- run --strict --revision=current benchmark/issue13-smoke.jsonl > benchmark-output/benchmark-current.jsonl
-          git worktree add /tmp/shogi-mate-solver-base origin/${{ github.base_ref }}
-          git diff origin/${{ github.base_ref }}...HEAD -- Cargo.toml Cargo.lock mate_solver/src/df_pn/search.rs mate_solver/src/eval/search.rs benchmark_harness/Cargo.toml benchmark_harness/src/main.rs benchmark/issue13-smoke.jsonl > benchmark-output/benchmark-harness.patch
-          git -C /tmp/shogi-mate-solver-base apply "${GITHUB_WORKSPACE}/benchmark-output/benchmark-harness.patch"
-          cargo run --locked --manifest-path /tmp/shogi-mate-solver-base/Cargo.toml -p benchmark_harness -- run --strict --revision=base /tmp/shogi-mate-solver-base/benchmark/issue13-smoke.jsonl > benchmark-output/benchmark-base.jsonl
-          cargo run --locked -p benchmark_harness -- compare --base benchmark-output/benchmark-base.jsonl --current benchmark-output/benchmark-current.jsonl --html benchmark-output/benchmark-report.html > benchmark-output/benchmark-comparison.jsonl
-      - uses: actions/upload-artifact@v7
-        if: always() && github.event_name == 'pull_request'
-        with:
-          name: benchmark-harness-jsonl
-          path: |
-            benchmark-output/benchmark-base.jsonl
-            benchmark-output/benchmark-current.jsonl
-            benchmark-output/benchmark-comparison.jsonl
-            benchmark-output/benchmark-report.html
       - name: Document
         run: cargo doc --verbose
       - name: cargo bloat (display, release)

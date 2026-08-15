@@ -64,6 +64,17 @@
       },
       "validation": "cargo run -p benchmark_harness -- run --strict --revision=current benchmark/issue13-smoke.jsonl && cargo run -p benchmark_harness -- compare --base /tmp/issue13-base.jsonl --current /tmp/issue13-current.jsonl --html /tmp/issue13-report.html",
       "passes": true
+    },
+    {
+      "id": "split-benchmark-workflow",
+      "description": "Move benchmark comparison CI into its own workflow file.",
+      "boundary": {
+        "files_dirs": [".github/workflows/rust.yml", ".github/workflows/benchmark.yml"],
+        "semantic_changes": "Remove benchmark comparison and artifact upload from the Rust workflow, add a dedicated benchmark workflow with equivalent PR benchmark behavior.",
+        "capability": "Edit listed workflow files only; run YAML/pre-commit checks and textual workflow inspection."
+      },
+      "validation": "rg \"Run benchmark comparison|benchmark-report.html|upload-artifact\" .github/workflows/benchmark.yml && ! rg \"Run benchmark comparison|benchmark-report.html|upload-artifact\" .github/workflows/rust.yml",
+      "passes": true
     }
   ]
 }
