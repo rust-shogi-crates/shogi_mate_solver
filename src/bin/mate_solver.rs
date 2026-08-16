@@ -9,6 +9,7 @@ use std::{
 use mate_solver::df_pn::search as dfpnsearch;
 use mate_solver::eval::Value;
 use mate_solver::eval::search as evalsearch;
+use mate_solver::move_ordering::MoveOrderingOptions;
 use mate_solver::position_wrapper::PositionWrapper;
 use mate_solver::tt::{DfPnTable, EvalTable};
 use shogi_core::{Move, PartialPosition, Position, ToUsi};
@@ -33,6 +34,7 @@ struct Opts {
     output: Output,
     move_format: MoveFormat,
     engine_path: Option<String>,
+    move_ordering: MoveOrderingOptions,
 }
 
 fn parse_args() -> Opts {
@@ -42,6 +44,7 @@ fn parse_args() -> Opts {
         output: Output::Text,
         move_format: MoveFormat::Traditional,
         engine_path: None,
+        move_ordering: MoveOrderingOptions::default(),
     };
     for a in args {
         if a == "--verbose" {
@@ -132,7 +135,7 @@ fn find_mate_sequence(
     loop {
         let mut ctx = evalsearch::SearchCtx::default();
         let (_value, mv) = if turn % 2 == 0 {
-            evalsearch::alpha_beta_me(
+            evalsearch::alpha_beta_me_with_options(
                 &position,
                 df_pn,
                 evals,
@@ -141,9 +144,10 @@ fn find_mate_sequence(
                 &mut BTreeSet::new(),
                 &mut ctx,
                 opts.verbose,
+                &opts.move_ordering,
             )
         } else {
-            evalsearch::alpha_beta_you(
+            evalsearch::alpha_beta_you_with_options(
                 &position,
                 df_pn,
                 evals,
@@ -152,6 +156,7 @@ fn find_mate_sequence(
                 &mut BTreeSet::new(),
                 &mut ctx,
                 opts.verbose,
+                &opts.move_ordering,
             )
         };
         if let Some(mv) = mv {
@@ -171,16 +176,23 @@ fn solve_myself(position: &PartialPosition, opts: &Opts) -> Option<Vec<Move>> {
     let mut df_pn = DfPnTable::new(size);
 
     let mut eval = EvalTable::new(size);
-    let mate_result = dfpnsearch::df_pn(
+    let mate_result = dfpnsearch::df_pn_with_options(
         &mut df_pn,
         &PositionWrapper::new(position.clone()),
         opts.verbose,
+        &opts.move_ordering,
     );
     // 不詰。
     if mate_result == (u32::MAX, 0) {
         return None;
     }
-    let result = evalsearch::search(position, &mut df_pn, &mut eval, opts.verbose);
+    let result = evalsearch::search_with_options(
+        position,
+        &mut df_pn,
+        &mut eval,
+        opts.verbose,
+        &opts.move_ordering,
+    );
     if opts.verbose {
         eprintln!("! result = {:?}", result);
     }

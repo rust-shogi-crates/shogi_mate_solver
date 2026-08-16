@@ -1,0 +1,92 @@
+{
+  "features": [
+    {
+      "id": "add-move-ordering-module",
+      "description": "Add a move_ordering module with default options and helpers for current df-pn and eval ordering behavior.",
+      "boundary": {
+        "files_dirs": ["mate_solver/src/move_ordering.rs", "mate_solver/src/lib.rs"],
+        "semantic_changes": "Introduce current-mode move-ordering options and helper functions; re-export the module.",
+        "capability": "Edit listed files; run targeted formatting/tests."
+      },
+      "validation": "cargo test --locked -p mate_solver move_ordering",
+      "passes": true
+    },
+    {
+      "id": "thread-dfpn-ordering",
+      "description": "Use the move-ordering helper from df-pn while preserving existing public wrappers and default behavior.",
+      "boundary": {
+        "files_dirs": ["mate_solver/src/df_pn/search.rs"],
+        "semantic_changes": "Add option-aware df-pn variants and replace inline current ordering with helper-backed current ordering.",
+        "capability": "Edit listed file; run targeted df-pn tests."
+      },
+      "validation": "cargo test --locked -p mate_solver df_pn::search",
+      "passes": true
+    },
+    {
+      "id": "thread-eval-ordering",
+      "description": "Use the move-ordering helper from eval search while preserving existing public wrappers and default behavior.",
+      "boundary": {
+        "files_dirs": ["mate_solver/src/eval/search.rs"],
+        "semantic_changes": "Add option-aware eval variants, use helper-backed current ordering, and pass options to nested df-pn calls.",
+        "capability": "Edit listed file; run targeted eval tests."
+      },
+      "validation": "cargo test --locked -p mate_solver eval::search",
+      "passes": true
+    },
+    {
+      "id": "thread-cli-default-options",
+      "description": "Thread default move-ordering options through the mate_solver CLI without adding a user-facing mode flag.",
+      "boundary": {
+        "files_dirs": ["src/bin/mate_solver.rs"],
+        "semantic_changes": "Store default move-ordering options in CLI opts and pass them to option-aware search APIs.",
+        "capability": "Edit listed file; run CLI manual checks."
+      },
+      "validation": "cargo run --bin mate_solver -- --move-format=usi <<<\"3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1\"",
+      "passes": true
+    },
+    {
+      "id": "validate-default-preservation",
+      "description": "Run automated checks, manual CLI functionality tests, and benchmark comparison for unchanged default behavior.",
+      "boundary": {
+        "files_dirs": ["codex-notes/issue-16-move-ordering-hooks"],
+        "semantic_changes": "Record validation observations only if notes are needed; do not change production code.",
+        "capability": "Run cargo fmt/test/clippy, cargo run CLI checks, and release benchmark harness commands; no external network access except already-fetched git refs."
+      },
+      "validation": "cargo fmt --check; cargo test --locked; cargo clippy --all-targets --locked -- -D warnings; release benchmark compare",
+      "passes": true
+    },
+    {
+      "id": "add-manual-trial-fixtures",
+      "description": "Add the manually tried mate/no-mate CLI positions to the CI benchmark fixture.",
+      "boundary": {
+        "files_dirs": ["benchmark/issue13-ci.jsonl"],
+        "semantic_changes": "Record manual trial positions with expected outcomes and mate plies where known.",
+        "capability": "Edit listed file; run benchmark harness strict validation."
+      },
+      "validation": "cargo run --release --locked -p benchmark_harness -- run --strict --revision=current benchmark/issue13-ci.jsonl",
+      "passes": true
+    },
+    {
+      "id": "update-architecture-diagram",
+      "description": "Update the architecture diagram source and generated PNG for the move_ordering dependency.",
+      "boundary": {
+        "files_dirs": ["mate_solver/ARCHITECTURE.dot", "mate_solver/ARCHITECTURE.png"],
+        "semantic_changes": "Show df_pn and eval depending on move_ordering.",
+        "capability": "Edit DOT source; run make ARCHITECTURE.png."
+      },
+      "validation": "make ARCHITECTURE.png; git diff --check",
+      "passes": true
+    },
+    {
+      "id": "make-ordering-mode-non-exhaustive",
+      "description": "Make MoveOrderingMode non-exhaustive so future modes can be added without breaking exhaustive downstream matches.",
+      "boundary": {
+        "files_dirs": ["mate_solver/src/move_ordering.rs"],
+        "semantic_changes": "Add non_exhaustive to the public move-ordering mode enum.",
+        "capability": "Edit listed file; run targeted move_ordering tests and clippy."
+      },
+      "validation": "cargo test --locked -p mate_solver move_ordering; cargo clippy --all-targets --locked -- -D warnings",
+      "passes": true
+    }
+  ]
+}

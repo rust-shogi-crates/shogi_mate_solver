@@ -1,1 +1,2 @@
-{"id":"mate5-2022-05-18-3","sfen":"3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1","expected":"mate"}
+{"id":"mate5-2022-05-18-3","sfen":"3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1","expected":"mate","expected_plies":5}
+{"id":"nomate-rook-hand-empty-board","sfen":"8k/9/9/9/9/9/9/9/9 b Rr2b4g4s4n4l18p 1","expected":"nomate"}

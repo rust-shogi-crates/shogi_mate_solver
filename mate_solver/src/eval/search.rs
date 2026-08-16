@@ -2,6 +2,7 @@ use shogi_core::{Hand, Move, PartialPosition, Piece, ToUsi};
 use std::collections::BTreeSet;
 
 use crate::{
+    move_ordering::{order_eval_moves, MoveOrderingOptions},
     position_wrapper::{Key, PositionWrapper},
     tt::{DfPnTable, EvalTable},
 };
@@ -54,13 +55,30 @@ pub fn search(
     evals: &mut EvalTable,
     verbose: bool,
 ) -> Value {
-    search_with_stats(
+    search_with_options(
+        position,
+        df_pn,
+        evals,
+        verbose,
+        &MoveOrderingOptions::default(),
+    )
+}
+
+pub fn search_with_options(
+    position: &PartialPosition,
+    df_pn: &mut DfPnTable,
+    evals: &mut EvalTable,
+    verbose: bool,
+    move_ordering: &MoveOrderingOptions,
+) -> Value {
+    search_with_options_and_stats(
         position,
         df_pn,
         evals,
         verbose,
         &mut SearchStats::default(),
         &mut crate::df_pn::search::SearchStats::default(),
+        move_ordering,
     )
 }
 
@@ -72,7 +90,27 @@ pub fn search_with_stats(
     stats: &mut SearchStats,
     df_pn_stats: &mut crate::df_pn::search::SearchStats,
 ) -> Value {
-    alpha_beta_me_with_stats(
+    search_with_options_and_stats(
+        position,
+        df_pn,
+        evals,
+        verbose,
+        stats,
+        df_pn_stats,
+        &MoveOrderingOptions::default(),
+    )
+}
+
+pub fn search_with_options_and_stats(
+    position: &PartialPosition,
+    df_pn: &mut DfPnTable,
+    evals: &mut EvalTable,
+    verbose: bool,
+    stats: &mut SearchStats,
+    df_pn_stats: &mut crate::df_pn::search::SearchStats,
+    move_ordering: &MoveOrderingOptions,
+) -> Value {
+    alpha_beta_me_with_options_and_stats(
         &PositionWrapper::new(position.clone()),
         df_pn,
         evals,
@@ -83,6 +121,7 @@ pub fn search_with_stats(
         verbose,
         stats,
         df_pn_stats,
+        move_ordering,
     )
     .0
 }
@@ -99,7 +138,32 @@ pub fn alpha_beta_me(
     ctx: &mut SearchCtx,
     verbose: bool,
 ) -> (Value, Option<Move>) {
-    alpha_beta_me_with_stats(
+    alpha_beta_me_with_options(
+        position,
+        df_pn,
+        evals,
+        alpha,
+        beta,
+        seen,
+        ctx,
+        verbose,
+        &MoveOrderingOptions::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn alpha_beta_me_with_options(
+    position: &PositionWrapper,
+    df_pn: &mut DfPnTable,
+    evals: &mut EvalTable,
+    alpha: Value,
+    beta: Value,
+    seen: &mut BTreeSet<Key>,
+    ctx: &mut SearchCtx,
+    verbose: bool,
+    move_ordering: &MoveOrderingOptions,
+) -> (Value, Option<Move>) {
+    alpha_beta_me_with_options_and_stats(
         position,
         df_pn,
         evals,
@@ -110,6 +174,7 @@ pub fn alpha_beta_me(
         verbose,
         &mut SearchStats::default(),
         &mut crate::df_pn::search::SearchStats::default(),
+        move_ordering,
     )
 }
 
@@ -120,12 +185,42 @@ pub fn alpha_beta_me_with_stats(
     df_pn: &mut DfPnTable,
     evals: &mut EvalTable,
     alpha: Value,
+    beta: Value,
+    seen: &mut BTreeSet<Key>,
+    ctx: &mut SearchCtx,
+    verbose: bool,
+    stats: &mut SearchStats,
+    df_pn_stats: &mut crate::df_pn::search::SearchStats,
+) -> (Value, Option<Move>) {
+    alpha_beta_me_with_options_and_stats(
+        position,
+        df_pn,
+        evals,
+        alpha,
+        beta,
+        seen,
+        ctx,
+        verbose,
+        stats,
+        df_pn_stats,
+        &MoveOrderingOptions::default(),
+    )
+}
+
+// Searches attacker moves with stats collection.
+#[allow(clippy::too_many_arguments)]
+pub fn alpha_beta_me_with_options_and_stats(
+    position: &PositionWrapper,
+    df_pn: &mut DfPnTable,
+    evals: &mut EvalTable,
+    alpha: Value,
     mut beta: Value,
     seen: &mut BTreeSet<Key>,
     ctx: &mut SearchCtx,
     verbose: bool,
     stats: &mut SearchStats,
     df_pn_stats: &mut crate::df_pn::search::SearchStats,
+    move_ordering: &MoveOrderingOptions,
 ) -> (Value, Option<Move>) {
     stats.positions_inspected += 1;
     if beta.plies() == 0 {
@@ -140,7 +235,7 @@ pub fn alpha_beta_me_with_stats(
     }
     // df_pn で簡単に不詰が読み切れるのであればそうする
     if beta.plies() >= 3 {
-        let mate_result = crate::df_pn::search::mid_with_stats(
+        let mate_result = crate::df_pn::search::mid_with_options_and_stats(
             df_pn,
             position,
             (10, 10),
@@ -149,6 +244,7 @@ pub fn alpha_beta_me_with_stats(
             &mut Default::default(),
             verbose,
             df_pn_stats,
+            move_ordering,
         );
         if mate_result == (u32::MAX, 0) {
             // 不詰を読み切れたので攻め方にとって最悪の評価値を返す。
@@ -179,16 +275,7 @@ pub fn alpha_beta_me_with_stats(
     }
     seen.insert(position.zobrist_hash());
 
-    // 詰みがありそうな局面から探索する。
-    all.sort_unstable_by_key(|&mv| {
-        let mut cp = position.clone();
-        cp.make_move(mv);
-        if let Some((_, delta)) = df_pn.fetch(cp.zobrist_hash()) {
-            delta
-        } else {
-            1
-        }
-    });
+    order_eval_moves(&mut all, position, df_pn, move_ordering);
 
     let mut best = None;
     for mv in all {
@@ -197,7 +284,7 @@ pub fn alpha_beta_me_with_stats(
         let mut next = position.clone();
         next.make_move(mv);
         ctx.push(mv);
-        let eval = alpha_beta_you_with_stats(
+        let eval = alpha_beta_you_with_options_and_stats(
             &next,
             df_pn,
             evals,
@@ -208,6 +295,7 @@ pub fn alpha_beta_me_with_stats(
             verbose,
             stats,
             df_pn_stats,
+            move_ordering,
         )
         .0;
         ctx.pop();
@@ -253,7 +341,32 @@ pub fn alpha_beta_you(
     ctx: &mut SearchCtx,
     verbose: bool,
 ) -> (Value, Option<Move>) {
-    alpha_beta_you_with_stats(
+    alpha_beta_you_with_options(
+        position,
+        df_pn,
+        evals,
+        alpha,
+        beta,
+        seen,
+        ctx,
+        verbose,
+        &MoveOrderingOptions::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn alpha_beta_you_with_options(
+    position: &PositionWrapper,
+    df_pn: &mut DfPnTable,
+    evals: &mut EvalTable,
+    alpha: Value,
+    beta: Value,
+    seen: &mut BTreeSet<Key>,
+    ctx: &mut SearchCtx,
+    verbose: bool,
+    move_ordering: &MoveOrderingOptions,
+) -> (Value, Option<Move>) {
+    alpha_beta_you_with_options_and_stats(
         position,
         df_pn,
         evals,
@@ -264,12 +377,42 @@ pub fn alpha_beta_you(
         verbose,
         &mut SearchStats::default(),
         &mut crate::df_pn::search::SearchStats::default(),
+        move_ordering,
     )
 }
 
 // Searches defender moves with stats collection.
 #[allow(clippy::too_many_arguments)]
 pub fn alpha_beta_you_with_stats(
+    position: &PositionWrapper,
+    df_pn: &mut DfPnTable,
+    evals: &mut EvalTable,
+    alpha: Value,
+    beta: Value,
+    seen: &mut BTreeSet<Key>,
+    ctx: &mut SearchCtx,
+    verbose: bool,
+    stats: &mut SearchStats,
+    df_pn_stats: &mut crate::df_pn::search::SearchStats,
+) -> (Value, Option<Move>) {
+    alpha_beta_you_with_options_and_stats(
+        position,
+        df_pn,
+        evals,
+        alpha,
+        beta,
+        seen,
+        ctx,
+        verbose,
+        stats,
+        df_pn_stats,
+        &MoveOrderingOptions::default(),
+    )
+}
+
+// Searches defender moves with stats collection.
+#[allow(clippy::too_many_arguments)]
+pub fn alpha_beta_you_with_options_and_stats(
     position: &PositionWrapper,
     df_pn: &mut DfPnTable,
     evals: &mut EvalTable,
@@ -280,6 +423,7 @@ pub fn alpha_beta_you_with_stats(
     verbose: bool,
     stats: &mut SearchStats,
     df_pn_stats: &mut crate::df_pn::search::SearchStats,
+    move_ordering: &MoveOrderingOptions,
 ) -> (Value, Option<Move>) {
     stats.positions_inspected += 1;
     if let Some((dn, pn)) = df_pn.fetch(position.zobrist_hash()) {
@@ -330,16 +474,7 @@ pub fn alpha_beta_you_with_stats(
     }
     seen.insert(position.zobrist_hash());
 
-    // 逃れがありそうな局面から探索する。
-    all.sort_unstable_by_key(|&mv| {
-        let mut cp = position.clone();
-        cp.make_move(mv);
-        if let Some((_, delta)) = df_pn.fetch(cp.zobrist_hash()) {
-            delta
-        } else {
-            1
-        }
-    });
+    order_eval_moves(&mut all, position, df_pn, move_ordering);
 
     let mut best = None;
     for &mv in &all {
@@ -349,7 +484,7 @@ pub fn alpha_beta_you_with_stats(
         let mut next = position.clone();
         next.make_move(mv);
         ctx.push(mv);
-        let eval = alpha_beta_me_with_stats(
+        let eval = alpha_beta_me_with_options_and_stats(
             &next,
             df_pn,
             evals,
@@ -360,6 +495,7 @@ pub fn alpha_beta_you_with_stats(
             verbose,
             stats,
             df_pn_stats,
+            move_ordering,
         )
         .0;
         ctx.pop();
