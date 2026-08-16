@@ -6,7 +6,9 @@ digraph dependency {
     eval_tbl -> tt;
     df_pn -> position_wrapper;
     df_pn -> df_pn_tbl;
+    df_pn -> move_ordering;
     eval -> position_wrapper;
     eval -> df_pn_tbl;
     eval -> eval_tbl;
+    eval -> move_ordering;
 }

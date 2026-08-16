@@ -3,6 +3,7 @@
 use shogi_core::{Move, Square};
 
 use crate::{
+    move_ordering::{order_df_pn_moves, MoveOrderingOptions},
     position_wrapper::{Key, PositionWrapper},
     tt::DfPnTable,
 };
@@ -57,7 +58,22 @@ impl core::fmt::Debug for SearchCtx {
 
 // ルートでの反復深化
 pub fn df_pn(dfpn_tbl: &mut DfPnTable, position: &PositionWrapper, verbose: bool) -> (u32, u32) {
-    df_pn_with_stats(dfpn_tbl, position, verbose, &mut SearchStats::default())
+    df_pn_with_options(dfpn_tbl, position, verbose, &MoveOrderingOptions::default())
+}
+
+pub fn df_pn_with_options(
+    dfpn_tbl: &mut DfPnTable,
+    position: &PositionWrapper,
+    verbose: bool,
+    move_ordering: &MoveOrderingOptions,
+) -> (u32, u32) {
+    df_pn_with_options_and_stats(
+        dfpn_tbl,
+        position,
+        verbose,
+        &mut SearchStats::default(),
+        move_ordering,
+    )
 }
 
 // Root iterative deepening with stats collection.
@@ -67,7 +83,23 @@ pub fn df_pn_with_stats(
     verbose: bool,
     stats: &mut SearchStats,
 ) -> (u32, u32) {
-    let (phi_now, delta_now) = mid_with_stats(
+    df_pn_with_options_and_stats(
+        dfpn_tbl,
+        position,
+        verbose,
+        stats,
+        &MoveOrderingOptions::default(),
+    )
+}
+
+pub fn df_pn_with_options_and_stats(
+    dfpn_tbl: &mut DfPnTable,
+    position: &PositionWrapper,
+    verbose: bool,
+    stats: &mut SearchStats,
+    move_ordering: &MoveOrderingOptions,
+) -> (u32, u32) {
+    let (phi_now, delta_now) = mid_with_options_and_stats(
         dfpn_tbl,
         position,
         (u32::MAX - 1, u32::MAX - 1),
@@ -76,12 +108,13 @@ pub fn df_pn_with_stats(
         &mut Default::default(),
         verbose,
         stats,
+        move_ordering,
     );
     // ループを見つけてしまった
     if phi_now != u32::MAX && delta_now != u32::MAX {
         eprintln!("! loop found: {} {}", phi_now, delta_now);
         dfpn_tbl.clear();
-        return mid_with_stats(
+        return mid_with_options_and_stats(
             dfpn_tbl,
             position,
             (u32::MAX, u32::MAX),
@@ -90,6 +123,7 @@ pub fn df_pn_with_stats(
             &mut Default::default(),
             verbose,
             stats,
+            move_ordering,
         );
     }
     (phi_now, delta_now)
@@ -106,7 +140,7 @@ pub fn mid(
     ctx: &mut SearchCtx,
     verbose: bool,
 ) -> (u32, u32) {
-    mid_with_stats(
+    mid_with_options_and_stats(
         dfpn_tbl,
         position,
         (phi_now, delta_now),
@@ -115,6 +149,7 @@ pub fn mid(
         ctx,
         verbose,
         &mut SearchStats::default(),
+        &MoveOrderingOptions::default(),
     )
 }
 
@@ -123,12 +158,38 @@ pub fn mid(
 pub fn mid_with_stats(
     dfpn_tbl: &mut DfPnTable,
     position: &PositionWrapper,
+    (phi_now, delta_now): (u32, u32),
+    node_kind: NodeKind,
+    allow_loop: bool,
+    ctx: &mut SearchCtx,
+    verbose: bool,
+    stats: &mut SearchStats,
+) -> (u32, u32) {
+    mid_with_options_and_stats(
+        dfpn_tbl,
+        position,
+        (phi_now, delta_now),
+        node_kind,
+        allow_loop,
+        ctx,
+        verbose,
+        stats,
+        &MoveOrderingOptions::default(),
+    )
+}
+
+// Expands a node and returns updated proof/disproof numbers.
+#[allow(clippy::too_many_arguments)]
+pub fn mid_with_options_and_stats(
+    dfpn_tbl: &mut DfPnTable,
+    position: &PositionWrapper,
     (mut phi_now, mut delta_now): (u32, u32),
     node_kind: NodeKind,
     allow_loop: bool,
     ctx: &mut SearchCtx,
     verbose: bool,
     stats: &mut SearchStats,
+    move_ordering: &MoveOrderingOptions,
 ) -> (u32, u32) {
     stats.positions_inspected += 1;
     if ctx.seq.len() >= 50 {
@@ -161,11 +222,7 @@ pub fn mid_with_stats(
         put_in_hash(dfpn_tbl, position.zobrist_hash(), (u32::MAX, 0));
         return (u32::MAX, 0);
     }
-    // 駒打ちは価値の低い駒を優先
-    moves.sort_unstable_by_key(|&mv| match mv {
-        Move::Normal { .. } => 0,
-        Move::Drop { piece, .. } => 60 - piece.piece_kind() as u8,
-    });
+    order_df_pn_moves(&mut moves, move_ordering);
     let mut children = vec![];
     for mv in moves {
         let mut cp = position.clone();
@@ -222,7 +279,7 @@ pub fn mid_with_stats(
         let mut next = position.clone();
         next.make_move(mv);
         ctx.push(mv);
-        mid_with_stats(
+        mid_with_options_and_stats(
             dfpn_tbl,
             &next,
             (phi_n_c, delta_n_c),
@@ -231,6 +288,7 @@ pub fn mid_with_stats(
             ctx,
             verbose,
             stats,
+            move_ordering,
         );
         ctx.pop();
     }
