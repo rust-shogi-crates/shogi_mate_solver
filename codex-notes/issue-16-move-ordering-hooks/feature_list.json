@@ -76,6 +76,17 @@
       },
       "validation": "make ARCHITECTURE.png; git diff --check",
       "passes": true
+    },
+    {
+      "id": "make-ordering-mode-non-exhaustive",
+      "description": "Make MoveOrderingMode non-exhaustive so future modes can be added without breaking exhaustive downstream matches.",
+      "boundary": {
+        "files_dirs": ["mate_solver/src/move_ordering.rs"],
+        "semantic_changes": "Add non_exhaustive to the public move-ordering mode enum.",
+        "capability": "Edit listed file; run targeted move_ordering tests and clippy."
+      },
+      "validation": "cargo test --locked -p mate_solver move_ordering; cargo clippy --all-targets --locked -- -D warnings",
+      "passes": true
     }
   ]
 }
