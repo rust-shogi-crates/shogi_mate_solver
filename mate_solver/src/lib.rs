@@ -14,7 +14,37 @@ pub mod tt;
 #[derive(Clone, Debug)]
 pub struct Answer {
     pub inner: Result<OkType, ErrType>,
+    pub stats: SearchStats,
     pub elapsed: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SearchStats {
+    pub df_pn: DfPnStats,
+    pub eval: EvalStats,
+}
+
+impl SearchStats {
+    fn from_internal(df_pn: dfpnsearch::SearchStats, eval: evalsearch::SearchStats) -> SearchStats {
+        SearchStats {
+            df_pn: DfPnStats {
+                positions_inspected: df_pn.positions_inspected,
+            },
+            eval: EvalStats {
+                positions_inspected: eval.positions_inspected,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DfPnStats {
+    pub positions_inspected: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct EvalStats {
+    pub positions_inspected: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -151,10 +181,13 @@ pub fn search(position: &PartialPosition, _timeout_ms: u64) -> Answer {
     let mut df_pn = DfPnTable::new(size);
 
     let mut eval = EvalTable::new(size);
-    let mate_result = dfpnsearch::df_pn(
+    let mut df_pn_stats = dfpnsearch::SearchStats::default();
+    let mut eval_stats = evalsearch::SearchStats::default();
+    let mate_result = dfpnsearch::df_pn_with_stats(
         &mut df_pn,
         &position_wrapper::PositionWrapper::new(position.clone()),
         verbose,
+        &mut df_pn_stats,
     );
     // 不詰。
     if mate_result == (u32::MAX, 0) {
@@ -163,10 +196,18 @@ pub fn search(position: &PartialPosition, _timeout_ms: u64) -> Answer {
                 resolution: Resolution::NoMate,
                 branches: vec![],
             }),
+            stats: SearchStats::from_internal(df_pn_stats, eval_stats),
             elapsed: 0.0,
         };
     }
-    let result = evalsearch::search(position, &mut df_pn, &mut eval, verbose);
+    let result = evalsearch::search_with_stats(
+        position,
+        &mut df_pn,
+        &mut eval,
+        verbose,
+        &mut eval_stats,
+        &mut df_pn_stats,
+    );
     if verbose {
         eprintln!("! result = {:?}", result);
     }
@@ -176,6 +217,7 @@ pub fn search(position: &PartialPosition, _timeout_ms: u64) -> Answer {
                 resolution: Resolution::NoMate,
                 branches: vec![],
             }),
+            stats: SearchStats::from_internal(df_pn_stats, eval_stats),
             elapsed: 0.0,
         };
     }
@@ -199,6 +241,7 @@ pub fn search(position: &PartialPosition, _timeout_ms: u64) -> Answer {
             resolution: Resolution::Mate,
             branches,
         }),
+        stats: SearchStats::from_internal(df_pn_stats, eval_stats),
         elapsed,
     }
 }
