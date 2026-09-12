@@ -58,9 +58,7 @@ impl<V: Copy> Tt<V> {
     }
 
     pub fn clear(&mut self) {
-        for v in &mut self.sizes {
-            *v = 0;
-        }
+        self.sizes.fill(0);
     }
 }
 
