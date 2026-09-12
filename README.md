@@ -36,15 +36,28 @@ benchmark_harness は JSONL の局面リストを読み、df-pn と eval の結�
 
 実行例:
 ```
-cargo run -p benchmark_harness -- run --strict --revision=current benchmark/issue13-ci.jsonl
+cargo run --release -p benchmark_harness -- run --strict --revision=current benchmark/issue13-ci.jsonl
+cargo run --release -p benchmark_harness -- run --strict --revision=current benchmark/issue16-ordering.jsonl
 ```
+
+`run` の結果には、手の順序付けを評価するためのフィールドを含む:
+
+- `root_chosen_move_rank`: ルートで実際に選ばれた、または df-pn で証明された手が、現在の順序付けで何番目だったか。0 なら最初の候補。
+- `root_first_candidate_chosen`: `root_chosen_move_rank == 0` の簡易指標。良い順序付けではこの割合が上がる。
+- `root_candidate_moves`: ルートで生成された候補手数。これは文脈情報であり、単独では順序付け品質を表さない。
+- `eval_positions_inspected`: eval 探索だけで調べた局面数。
+- `df_pn_positions_inspected`: eval 探索中の df-pn 呼び出しで調べた局面数。
+
+`benchmark/issue16-ordering.jsonl` は、順序付け評価用の小さな代表 fixture。局面は既存の solver tests と `benchmark/issue13-ci.jsonl` から採った。`ordering-mate5-multi-candidate` と `ordering-mate9-longer` は repo 内 test comment が `shogi-mate-problems` の `2022-05-18` を参照している。`ordering-df-pn-mate` は `2022-05-19/dpm.psn` を参照している。`ordering-mate3-short` と `ordering-nomate-rook-hand-empty-board` は repo 内の local/synthetic fixture。
+
+`mate_solver::search` が返す branch 情報は、将来の NNUE で `Position -> mate probability` を学習するための mate/no-mate ラベル候補として使える。ただし、この benchmark harness は学習データ exporter ではなく、PR2 では root の順序付け品質と探索量を測る。
 
 比較例:
 ```
 cargo run -p benchmark_harness -- compare --base benchmark-base.jsonl --current benchmark-current.jsonl --html benchmark-report.html
 ```
 
-`compare` の `ratio` は `current_elapsed_ms / base_elapsed_ms`。1.0 未満なら current の方が速い。比較結果には `mean`, `median`, `stddev`, `p90`, `p95`, `p99` を含む。df-pn の `proof_number` と `disproof_number` は実装中の phi/delta に対応する。
+`compare` の `ratio` は `current_elapsed_ms / base_elapsed_ms`。1.0 未満なら current の方が速い。比較結果には `mean`, `median`, `stddev`, `p90`, `p95`, `p99` を含む。df-pn の `proof_number` と `disproof_number` は実装中の phi/delta に対応する。順序付け品質は `root_chosen_move_rank`、`root_first_candidate_chosen`、および `root_chosen_move_rank / root_candidate_moves` の平均で見る。`root_candidate_moves` 自体は探索局面の文脈情報なので、base/current の良し悪し比較には使わない。base/current の片方にしかない result は `type: "warning"` として出力し、共通 result だけを比較する。ただし current 側の `correct: false` は、base に対応 result がなくても失敗として扱う。
 
 `--html` を指定すると、同じ統計を人間が読みやすい HTML レポートにも出力する。
 
