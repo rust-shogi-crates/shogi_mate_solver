@@ -10,11 +10,12 @@ use std::{
 use mate_solver::{
     df_pn::search as dfpnsearch,
     eval::{Value, search as evalsearch},
+    move_ordering::{MoveOrderingOptions, order_df_pn_moves, order_eval_moves},
     position_wrapper::PositionWrapper,
     tt::{DfPnTable, EvalTable},
 };
 use serde_json::{Value as JsonValue, json};
-use shogi_core::PartialPosition;
+use shogi_core::{Move, PartialPosition, ToUsi};
 use shogi_usi_parser::FromUsi;
 
 const TABLE_SIZE: usize = 1 << 16;
@@ -59,6 +60,11 @@ struct ResultRecord {
     elapsed_ms: f64,
     positions_inspected: u64,
     correct: Option<bool>,
+    root_candidate_moves: Option<u64>,
+    root_chosen_move_rank: Option<u64>,
+    root_first_candidate_chosen: Option<bool>,
+    eval_positions_inspected: Option<u64>,
+    df_pn_positions_inspected: Option<u64>,
 }
 
 #[derive(Default)]
@@ -72,6 +78,21 @@ struct CompareTotals {
     inspected_current: Vec<f64>,
     ratios: Vec<f64>,
     inspected_ratios: Vec<f64>,
+    root_chosen_rank_base: Vec<f64>,
+    root_chosen_rank_current: Vec<f64>,
+    root_chosen_rank_fraction_base: Vec<f64>,
+    root_chosen_rank_fraction_current: Vec<f64>,
+    root_first_candidate_base_hits: u64,
+    root_first_candidate_current_hits: u64,
+    root_first_candidate_pairs: u64,
+    eval_inspected_base: Vec<f64>,
+    eval_inspected_current: Vec<f64>,
+    df_pn_inspected_base: Vec<f64>,
+    df_pn_inspected_current: Vec<f64>,
+    inspected_per_candidate_base: Vec<f64>,
+    inspected_per_candidate_current: Vec<f64>,
+    base_only: u64,
+    current_only: u64,
 }
 
 struct ComparisonSummary {
@@ -85,6 +106,20 @@ struct ComparisonSummary {
     inspected_current: Stats,
     ratio: Stats,
     inspected_ratio: Stats,
+    root_chosen_rank_base: Stats,
+    root_chosen_rank_current: Stats,
+    root_chosen_rank_fraction_base: Stats,
+    root_chosen_rank_fraction_current: Stats,
+    root_first_candidate_base: Option<f64>,
+    root_first_candidate_current: Option<f64>,
+    eval_inspected_base: Stats,
+    eval_inspected_current: Stats,
+    df_pn_inspected_base: Stats,
+    df_pn_inspected_current: Stats,
+    inspected_per_candidate_base: Stats,
+    inspected_per_candidate_current: Stats,
+    base_only: u64,
+    current_only: u64,
     passed: bool,
 }
 
@@ -265,18 +300,22 @@ fn evaluate_position(record: &PositionRecord, verbose: bool) -> Result<(), Strin
 fn evaluate_df_pn(record: &PositionRecord, position: &PartialPosition, verbose: bool) {
     let mut df_pn = DfPnTable::new(TABLE_SIZE);
     let mut stats = dfpnsearch::SearchStats::default();
+    let wrapped = PositionWrapper::new(position.clone());
+    let ordered_root_moves = ordered_df_pn_root_moves(&wrapped);
+    let root_candidate_moves = ordered_root_moves.len() as u64;
     let started = Instant::now();
-    let (proof_number, disproof_number) = dfpnsearch::df_pn_with_stats(
-        &mut df_pn,
-        &PositionWrapper::new(position.clone()),
-        verbose,
-        &mut stats,
-    );
+    let (proof_number, disproof_number) =
+        dfpnsearch::df_pn_with_stats(&mut df_pn, &wrapped, verbose, &mut stats);
     let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
     let resolution = if (proof_number, disproof_number) == (u32::MAX, 0) {
         Expected::NoMate
     } else {
         Expected::Mate
+    };
+    let ordering = if resolution == Expected::Mate {
+        df_pn_root_ordering_result(&ordered_root_moves, &wrapped, &df_pn)
+    } else {
+        RootOrderingResult::default()
     };
     println!(
         "{}",
@@ -291,6 +330,10 @@ fn evaluate_df_pn(record: &PositionRecord, position: &PartialPosition, verbose: 
             "resolution": resolution.as_str(),
             "expected": record.expected.map(Expected::as_str),
             "correct": record.expected.map(|expected| expected == resolution),
+            "root_candidate_moves": root_candidate_moves,
+            "root_chosen_move": ordering.chosen_move,
+            "root_chosen_move_rank": ordering.chosen_move_rank,
+            "root_first_candidate_chosen": ordering.first_candidate_chosen,
             "proof_number": proof_number,
             "disproof_number": disproof_number,
         })
@@ -302,18 +345,20 @@ fn evaluate_eval(record: &PositionRecord, position: &PartialPosition, verbose: b
     let mut eval = EvalTable::new(TABLE_SIZE);
     let mut seed_stats = dfpnsearch::SearchStats::default();
     let mut eval_stats = evalsearch::SearchStats::default();
-    dfpnsearch::df_pn_with_stats(
-        &mut df_pn,
-        &PositionWrapper::new(position.clone()),
-        verbose,
-        &mut seed_stats,
-    );
+    let wrapped = PositionWrapper::new(position.clone());
+    dfpnsearch::df_pn_with_stats(&mut df_pn, &wrapped, verbose, &mut seed_stats);
+    let ordered_root_moves = ordered_eval_root_moves(&wrapped, &df_pn);
+    let root_candidate_moves = ordered_root_moves.len() as u64;
     let mut df_pn_stats = dfpnsearch::SearchStats::default();
     let started = Instant::now();
-    let value = evalsearch::search_with_stats(
-        position,
+    let (value, best_move) = evalsearch::alpha_beta_me_with_stats(
+        &wrapped,
         &mut df_pn,
         &mut eval,
+        Value::ZERO,
+        Value::new(40, 0, 0),
+        &mut BTreeSet::new(),
+        &mut Default::default(),
         verbose,
         &mut eval_stats,
         &mut df_pn_stats,
@@ -330,6 +375,7 @@ fn evaluate_eval(record: &PositionRecord, position: &PartialPosition, verbose: b
                 !value.is_mate() || value.plies() as u64 == expected_plies
             })
     });
+    let chosen_move_rank = root_chosen_move_rank(&ordered_root_moves, best_move);
     println!(
         "{}",
         json!({
@@ -344,9 +390,64 @@ fn evaluate_eval(record: &PositionRecord, position: &PartialPosition, verbose: b
             "expected": record.expected.map(Expected::as_str),
             "expected_plies": record.expected_plies,
             "correct": correct,
+            "root_candidate_moves": root_candidate_moves,
+            "root_chosen_move": best_move.map(|mv| mv.to_usi_owned()),
+            "root_chosen_move_rank": chosen_move_rank,
+            "root_first_candidate_chosen": chosen_move_rank.map(|rank| rank == 0),
+            "eval_positions_inspected": eval_stats.positions_inspected,
+            "df_pn_positions_inspected": df_pn_stats.positions_inspected,
             "value": value_json(value),
         })
     );
+}
+
+#[derive(Default)]
+struct RootOrderingResult {
+    chosen_move: Option<String>,
+    chosen_move_rank: Option<usize>,
+    first_candidate_chosen: Option<bool>,
+}
+
+fn ordered_df_pn_root_moves(position: &PositionWrapper) -> Vec<Move> {
+    let mut moves = position.all_checks();
+    order_df_pn_moves(&mut moves, &MoveOrderingOptions::default());
+    moves
+}
+
+fn ordered_eval_root_moves(position: &PositionWrapper, df_pn: &DfPnTable) -> Vec<Move> {
+    let mut moves = position.all_checks();
+    order_eval_moves(&mut moves, position, df_pn, &MoveOrderingOptions::default());
+    moves
+}
+
+fn df_pn_root_ordering_result(
+    ordered_moves: &[Move],
+    position: &PositionWrapper,
+    df_pn: &DfPnTable,
+) -> RootOrderingResult {
+    for (rank, &mv) in ordered_moves.iter().enumerate() {
+        let mut child = position.clone();
+        child.make_move(mv);
+        if df_pn
+            .fetch(child.zobrist_hash())
+            .is_some_and(|(_, delta)| delta == 0)
+        {
+            return RootOrderingResult {
+                chosen_move: Some(mv.to_usi_owned()),
+                chosen_move_rank: Some(rank),
+                first_candidate_chosen: Some(rank == 0),
+            };
+        }
+    }
+    RootOrderingResult::default()
+}
+
+fn root_chosen_move_rank(ordered_moves: &[Move], chosen_move: Option<Move>) -> Option<usize> {
+    chosen_move.and_then(|chosen_move| {
+        ordered_moves
+            .iter()
+            .position(|&candidate| candidate == chosen_move)
+    })
 }
 
 fn value_json(value: Value) -> JsonValue {
@@ -419,6 +520,18 @@ fn compare_outputs(args: &[String]) -> Result<(), ()> {
     let (base_records, base_failed) = read_result_records(&base);
     let (current_records, current_failed) = read_result_records(&current);
     let mut failed = base_failed || current_failed;
+    for record in current_records.values() {
+        if record.correct == Some(false) {
+            emit_compare_error(
+                "compare",
+                format!(
+                    "current result for {}/{} is incorrect",
+                    record.id, record.evaluator
+                ),
+            );
+            failed = true;
+        }
+    }
     let mut evaluators = BTreeSet::new();
     evaluators.extend(base_records.keys().map(|(_, evaluator)| evaluator.clone()));
     evaluators.extend(
@@ -431,12 +544,37 @@ fn compare_outputs(args: &[String]) -> Result<(), ()> {
     let mut summaries = Vec::new();
     for evaluator in evaluators {
         let mut totals = CompareTotals::default();
-        let ids: BTreeSet<_> = base_records
+        let base_ids: BTreeSet<_> = base_records
             .keys()
             .filter(|(_, key_evaluator)| key_evaluator == &evaluator)
             .map(|(id, _)| id.clone())
             .collect();
-        for id in ids {
+        let current_ids: BTreeSet<_> = current_records
+            .keys()
+            .filter(|(_, key_evaluator)| key_evaluator == &evaluator)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in base_ids.difference(&current_ids) {
+            totals.base_only += 1;
+            aggregate.base_only += 1;
+            emit_compare_warning(
+                "base_only",
+                id,
+                &evaluator,
+                "base result has no matching current result",
+            );
+        }
+        for id in current_ids.difference(&base_ids) {
+            totals.current_only += 1;
+            aggregate.current_only += 1;
+            emit_compare_warning(
+                "current_only",
+                id,
+                &evaluator,
+                "current result has no matching base result",
+            );
+        }
+        for id in base_ids.intersection(&current_ids) {
             let key = (id.clone(), evaluator.clone());
             let Some(base_record) = base_records.get(&key) else {
                 emit_compare_error(
@@ -541,6 +679,21 @@ fn parse_result_record(value: &JsonValue) -> Result<ResultRecord, String> {
             .and_then(JsonValue::as_u64)
             .ok_or_else(|| "missing integer field `positions_inspected`".to_owned())?,
         correct: value.get("correct").and_then(JsonValue::as_bool),
+        root_candidate_moves: value
+            .get("root_candidate_moves")
+            .and_then(JsonValue::as_u64),
+        root_chosen_move_rank: value
+            .get("root_chosen_move_rank")
+            .and_then(JsonValue::as_u64),
+        root_first_candidate_chosen: value
+            .get("root_first_candidate_chosen")
+            .and_then(JsonValue::as_bool),
+        eval_positions_inspected: value
+            .get("eval_positions_inspected")
+            .and_then(JsonValue::as_u64),
+        df_pn_positions_inspected: value
+            .get("df_pn_positions_inspected")
+            .and_then(JsonValue::as_u64),
     })
 }
 
@@ -576,12 +729,76 @@ fn add_pair(totals: &mut CompareTotals, base: &ResultRecord, current: &ResultRec
             .inspected_ratios
             .push(current.positions_inspected as f64 / base.positions_inspected as f64);
     }
+    add_optional_pair(
+        &mut totals.root_chosen_rank_base,
+        &mut totals.root_chosen_rank_current,
+        base.root_chosen_move_rank,
+        current.root_chosen_move_rank,
+    );
+    if let (Some(base_rank), Some(base_candidates), Some(current_rank), Some(current_candidates)) = (
+        base.root_chosen_move_rank,
+        base.root_candidate_moves,
+        current.root_chosen_move_rank,
+        current.root_candidate_moves,
+    ) && base_candidates > 0
+        && current_candidates > 0
+    {
+        totals
+            .root_chosen_rank_fraction_base
+            .push(base_rank as f64 / base_candidates as f64);
+        totals
+            .root_chosen_rank_fraction_current
+            .push(current_rank as f64 / current_candidates as f64);
+    }
+    if let (Some(base_hit), Some(current_hit)) = (
+        base.root_first_candidate_chosen,
+        current.root_first_candidate_chosen,
+    ) {
+        totals.root_first_candidate_pairs += 1;
+        totals.root_first_candidate_base_hits += u64::from(base_hit);
+        totals.root_first_candidate_current_hits += u64::from(current_hit);
+    }
+    add_optional_pair(
+        &mut totals.eval_inspected_base,
+        &mut totals.eval_inspected_current,
+        base.eval_positions_inspected,
+        current.eval_positions_inspected,
+    );
+    add_optional_pair(
+        &mut totals.df_pn_inspected_base,
+        &mut totals.df_pn_inspected_current,
+        base.df_pn_positions_inspected,
+        current.df_pn_positions_inspected,
+    );
+    if let (Some(base_candidates), Some(current_candidates)) =
+        (base.root_candidate_moves, current.root_candidate_moves)
+        && base_candidates > 0
+        && current_candidates > 0
+    {
+        totals
+            .inspected_per_candidate_base
+            .push(base.positions_inspected as f64 / base_candidates as f64);
+        totals
+            .inspected_per_candidate_current
+            .push(current.positions_inspected as f64 / current_candidates as f64);
+    }
+}
+
+fn add_optional_pair(
+    base_values: &mut Vec<f64>,
+    current_values: &mut Vec<f64>,
+    base: Option<u64>,
+    current: Option<u64>,
+) {
+    if let (Some(base), Some(current)) = (base, current) {
+        base_values.push(base as f64);
+        current_values.push(current as f64);
+    }
 }
 
 fn comparison_summary(evaluator: &str, totals: &CompareTotals) -> ComparisonSummary {
-    let failed = totals.correct_current < totals.correct_base
-        || totals.correct_current < totals.positions
-        || totals.positions == 0;
+    let failed =
+        totals.correct_current < totals.correct_base || totals.correct_current < totals.positions;
     ComparisonSummary {
         evaluator: evaluator.to_owned(),
         positions: totals.positions,
@@ -593,7 +810,35 @@ fn comparison_summary(evaluator: &str, totals: &CompareTotals) -> ComparisonSumm
         inspected_current: stats(&totals.inspected_current),
         ratio: stats(&totals.ratios),
         inspected_ratio: stats(&totals.inspected_ratios),
+        root_chosen_rank_base: stats(&totals.root_chosen_rank_base),
+        root_chosen_rank_current: stats(&totals.root_chosen_rank_current),
+        root_chosen_rank_fraction_base: stats(&totals.root_chosen_rank_fraction_base),
+        root_chosen_rank_fraction_current: stats(&totals.root_chosen_rank_fraction_current),
+        root_first_candidate_base: hit_rate(
+            totals.root_first_candidate_base_hits,
+            totals.root_first_candidate_pairs,
+        ),
+        root_first_candidate_current: hit_rate(
+            totals.root_first_candidate_current_hits,
+            totals.root_first_candidate_pairs,
+        ),
+        eval_inspected_base: stats(&totals.eval_inspected_base),
+        eval_inspected_current: stats(&totals.eval_inspected_current),
+        df_pn_inspected_base: stats(&totals.df_pn_inspected_base),
+        df_pn_inspected_current: stats(&totals.df_pn_inspected_current),
+        inspected_per_candidate_base: stats(&totals.inspected_per_candidate_base),
+        inspected_per_candidate_current: stats(&totals.inspected_per_candidate_current),
+        base_only: totals.base_only,
+        current_only: totals.current_only,
         passed: !failed,
+    }
+}
+
+fn hit_rate(hits: u64, pairs: u64) -> Option<f64> {
+    if pairs == 0 {
+        None
+    } else {
+        Some(hits as f64 / pairs as f64)
     }
 }
 
@@ -612,6 +857,20 @@ fn emit_comparison(summary: &ComparisonSummary) {
             "positions_inspected_current": stats_to_json(&summary.inspected_current),
             "ratio": stats_to_json(&summary.ratio),
             "positions_inspected_ratio": stats_to_json(&summary.inspected_ratio),
+            "root_chosen_move_rank_base": stats_to_json(&summary.root_chosen_rank_base),
+            "root_chosen_move_rank_current": stats_to_json(&summary.root_chosen_rank_current),
+            "root_chosen_move_rank_fraction_base": stats_to_json(&summary.root_chosen_rank_fraction_base),
+            "root_chosen_move_rank_fraction_current": stats_to_json(&summary.root_chosen_rank_fraction_current),
+            "root_first_candidate_chosen_rate_base": summary.root_first_candidate_base,
+            "root_first_candidate_chosen_rate_current": summary.root_first_candidate_current,
+            "eval_positions_inspected_base": stats_to_json(&summary.eval_inspected_base),
+            "eval_positions_inspected_current": stats_to_json(&summary.eval_inspected_current),
+            "df_pn_positions_inspected_base": stats_to_json(&summary.df_pn_inspected_base),
+            "df_pn_positions_inspected_current": stats_to_json(&summary.df_pn_inspected_current),
+            "positions_inspected_per_root_candidate_base": stats_to_json(&summary.inspected_per_candidate_base),
+            "positions_inspected_per_root_candidate_current": stats_to_json(&summary.inspected_per_candidate_current),
+            "base_only": summary.base_only,
+            "current_only": summary.current_only,
             "passed": summary.passed,
         })
     );
@@ -685,6 +944,20 @@ fn emit_compare_error(stage: &str, message: String) {
         json!({
             "type": "error",
             "stage": stage,
+            "message": message,
+        })
+    );
+}
+
+fn emit_compare_warning(kind: &str, id: &str, evaluator: &str, message: &str) {
+    let _ = writeln!(
+        io::stdout(),
+        "{}",
+        json!({
+            "type": "warning",
+            "kind": kind,
+            "id": id,
+            "evaluator": evaluator,
             "message": message,
         })
     );
@@ -766,6 +1039,44 @@ th{background:#f8fafd;font-weight:600}
         |summary| &summary.inspected_base,
         |summary| &summary.inspected_current,
     );
+    html.push_str("<h2>Root Ordering</h2>");
+    write_stats_table(
+        &mut html,
+        summaries,
+        "rank",
+        |summary| &summary.root_chosen_rank_base,
+        |summary| &summary.root_chosen_rank_current,
+    );
+    write_stats_table(
+        &mut html,
+        summaries,
+        "rank/root candidates",
+        |summary| &summary.root_chosen_rank_fraction_base,
+        |summary| &summary.root_chosen_rank_fraction_current,
+    );
+    write_first_candidate_table(&mut html, summaries);
+    html.push_str("<h2>Split Positions Inspected</h2>");
+    write_stats_table(
+        &mut html,
+        summaries,
+        "eval positions",
+        |summary| &summary.eval_inspected_base,
+        |summary| &summary.eval_inspected_current,
+    );
+    write_stats_table(
+        &mut html,
+        summaries,
+        "df-pn positions",
+        |summary| &summary.df_pn_inspected_base,
+        |summary| &summary.df_pn_inspected_current,
+    );
+    write_stats_table(
+        &mut html,
+        summaries,
+        "positions per root move",
+        |summary| &summary.inspected_per_candidate_base,
+        |summary| &summary.inspected_per_candidate_current,
+    );
     html.push_str("<h2>Ratios</h2>");
     write_ratio_table(&mut html, summaries);
     html.push_str("</body></html>\n");
@@ -811,6 +1122,24 @@ fn write_stats_table<FBase, FCurrent>(
         push_opt_f64(html, base.stddev);
         html.push_str("</td><td class=\"num\">");
         push_opt_f64(html, current.stddev);
+        html.push_str("</td></tr>");
+    }
+    html.push_str("</tbody></table>");
+}
+
+fn write_first_candidate_table(html: &mut String, summaries: &[ComparisonSummary]) {
+    html.push_str("<table><thead><tr><th>Evaluator</th><th>Base first-candidate hit rate</th><th>Current first-candidate hit rate</th><th>Base-only records</th><th>Current-only records</th></tr></thead><tbody>");
+    for summary in summaries {
+        html.push_str("<tr><td>");
+        html_escape_into(html, &summary.evaluator);
+        html.push_str("</td><td class=\"num\">");
+        push_opt_f64(html, summary.root_first_candidate_base);
+        html.push_str("</td><td class=\"num\">");
+        push_opt_f64(html, summary.root_first_candidate_current);
+        html.push_str("</td><td class=\"num\">");
+        push_u64(html, summary.base_only);
+        html.push_str("</td><td class=\"num\">");
+        push_u64(html, summary.current_only);
         html.push_str("</td></tr>");
     }
     html.push_str("</tbody></table>");

@@ -1,0 +1,5 @@
+{"id":"ordering-mate5-multi-candidate","sfen":"3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1","expected":"mate","expected_plies":5}
+{"id":"ordering-mate9-longer","sfen":"5kgnl/9/4+B1pp1/8p/9/9/9/9/9 b 2S2rb3g2s3n3l15p 1","expected":"mate","expected_plies":9}
+{"id":"ordering-mate3-short","sfen":"7kl/9/6G1p/9/9/9/9/9/9 b S 1","expected":"mate","expected_plies":3}
+{"id":"ordering-df-pn-mate","sfen":"7nk/9/6PB1/6NP1/9/9/9/9/9 b P2rb4g4s2n4l15p 1","expected":"mate"}
+{"id":"ordering-nomate-rook-hand-empty-board","sfen":"8k/9/9/9/9/9/9/9/9 b Rr2b4g4s4n4l18p 1","expected":"nomate"}

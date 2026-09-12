@@ -1,0 +1,70 @@
+{
+  "features": [
+    {
+      "id": "extend-run-metrics",
+      "description": "Add ordering-relevant benchmark result fields while preserving existing output fields.",
+      "boundary": {
+        "files_dirs": ["benchmark_harness/src/main.rs"],
+        "semantic_changes": "Emit root candidate context, chosen root move rank/hit fields, and split eval/df-pn inspected-position counts.",
+        "capability": "Edit listed file; run benchmark harness tests/runs."
+      },
+      "validation": "cargo run --release --locked -p benchmark_harness -- run --strict --revision=current benchmark/issue13-ci.jsonl",
+      "passes": true
+    },
+    {
+      "id": "compare-optional-metrics",
+      "description": "Teach compare to parse optional new metrics and handle current-only fixture additions safely.",
+      "boundary": {
+        "files_dirs": ["benchmark_harness/src/main.rs"],
+        "semantic_changes": "Compare common records, summarize chosen-rank/rank-fraction/first-hit metrics, fail incorrect current records, and emit type=warning records for unmatched ids.",
+        "capability": "Edit listed file; run compare smoke tests."
+      },
+      "validation": "cargo run --release --locked -p benchmark_harness -- compare --base <base.jsonl> --current <current.jsonl>",
+      "passes": true
+    },
+    {
+      "id": "add-issue16-fixture",
+      "description": "Add a small representative issue 16 benchmark fixture.",
+      "boundary": {
+        "files_dirs": ["benchmark/issue16-ordering.jsonl"],
+        "semantic_changes": "Add CI-safe benchmark positions for ordering evaluation.",
+        "capability": "Edit listed file; run strict benchmark harness validation."
+      },
+      "validation": "cargo run --release --locked -p benchmark_harness -- run --strict --revision=current benchmark/issue16-ordering.jsonl",
+      "passes": true
+    },
+    {
+      "id": "document-ordering-benchmarks",
+      "description": "Document new benchmark metrics, fixture usage, and compare behavior.",
+      "boundary": {
+        "files_dirs": ["README.md"],
+        "semantic_changes": "Describe chosen-rank/first-hit metrics, root_candidate_moves context, split inspected counts, branch-label relevance, issue 16 fixture, and unmatched-record warnings.",
+        "capability": "Edit listed file; review rendered Markdown mentally."
+      },
+      "validation": "rg \"issue16-ordering|root_chosen_move_rank|root_first_candidate_chosen|type: \\\"warning\\\"\" README.md",
+      "passes": true
+    },
+    {
+      "id": "update-benchmark-workflow",
+      "description": "Update benchmark CI to run both the existing CI fixture and the issue 16 ordering fixture.",
+      "boundary": {
+        "files_dirs": [".github/workflows/benchmark.yml"],
+        "semantic_changes": "Include issue 16 fixture in benchmark CI while preserving action pinning.",
+        "capability": "Edit listed file; run YAML/diff checks."
+      },
+      "validation": "git diff --check .github/workflows/benchmark.yml",
+      "passes": true
+    },
+    {
+      "id": "validate-pr2",
+      "description": "Run final validation for benchmark metrics and fixtures.",
+      "boundary": {
+        "files_dirs": ["codex-notes/issue-16-ordering-metrics"],
+        "semantic_changes": "Record validation state only; do not change production code.",
+        "capability": "Run cargo fmt/test/clippy and release benchmark run/compare commands."
+      },
+      "validation": "cargo fmt --check; cargo test --locked; cargo clippy --all-targets --locked -- -D warnings",
+      "passes": true
+    }
+  ]
+}
