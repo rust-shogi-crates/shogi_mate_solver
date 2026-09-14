@@ -1,0 +1,48 @@
+{
+  "features": [
+    {
+      "id": "add-feature-module",
+      "description": "Add a features module with deterministic integer feature IDs and a role-aware extraction API.",
+      "boundary": {
+        "files_dirs": ["mate_solver/src/features.rs", "mate_solver/src/lib.rs"],
+        "semantic_changes": "Introduce static feature extraction types and re-export the module without changing solver behavior.",
+        "capability": "Edit listed files; run targeted feature tests."
+      },
+      "validation": "cargo test --locked -p mate_solver features",
+      "passes": false
+    },
+    {
+      "id": "encode-position-features",
+      "description": "Extract side-to-move, board piece, king-relative coordinate, and hand-count features deterministically.",
+      "boundary": {
+        "files_dirs": ["mate_solver/src/features.rs"],
+        "semantic_changes": "Add model-agnostic position feature IDs based on shogi_core numeric APIs.",
+        "capability": "Edit listed file; run focused feature stability tests."
+      },
+      "validation": "cargo test --locked -p mate_solver features",
+      "passes": false
+    },
+    {
+      "id": "encode-candidate-move-features",
+      "description": "Extract candidate move features for normal moves, drops, promotion flags, from/to squares, dropped piece kind, and attacker/defender role.",
+      "boundary": {
+        "files_dirs": ["mate_solver/src/features.rs"],
+        "semantic_changes": "Add role-aware move feature IDs without wiring them into move ordering.",
+        "capability": "Edit listed file; run focused feature stability tests."
+      },
+      "validation": "cargo test --locked -p mate_solver features",
+      "passes": false
+    },
+    {
+      "id": "validate-feature-stability",
+      "description": "Add and run tests plus manual fixture inspection to confirm feature IDs and output order are stable.",
+      "boundary": {
+        "files_dirs": ["mate_solver/src/features.rs"],
+        "semantic_changes": "Lock representative feature IDs and deterministic ordering with tests only.",
+        "capability": "Run cargo fmt/test/clippy and inspect deterministic fixture output."
+      },
+      "validation": "cargo fmt --check; cargo test --locked -p mate_solver features; cargo test --locked; cargo clippy --all-targets --locked -- -D warnings",
+      "passes": false
+    }
+  ]
+}
