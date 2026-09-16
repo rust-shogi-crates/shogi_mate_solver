@@ -1,8 +1,8 @@
 # Issue 16 NNUE Move Ordering Plan
 
-## Mode
+## Plan status
 
-Workflow mode: plan mode.
+Canonical issue-level checklist. Its wording does not activate a workflow mode.
 
 This file is the issue-level control plan for the remaining NNUE move-ordering work. It is intended to be merged into `main` and used to spawn smaller PRs. Do not implement multiple remaining PRs from this file in one PR.
 
@@ -10,10 +10,20 @@ Each implementation PR should:
 
 - Start from current `origin/HEAD` after `git fetch --prune`.
 - Use its own `codex/issue-16-...` branch and dedicated worktree.
-- Create a PR-local `codex-notes/<task-slug>/plan.md` before code edits.
+- Treat this file under `plans/` as the canonical implementation plan and update
+  its checklist in the implementation PR.
+- Mark implementation, functional-test, and self-review items `[x]` once they
+  are completed and validated in the PR; do not wait for merge.
 - Keep default solver behavior unchanged unless the PR explicitly introduces an opt-in mode.
 - Preserve exact mate/no-mate correctness; learned scoring may only change candidate move order.
-- Remove PR-local `codex-notes` right before merge. Durable guidance belongs under `plans/`.
+- Do not create a duplicate PR-local plan or research note when the canonical
+  plan is sufficient. Durable guidance belongs under `plans/`.
+
+If the suggested branch or worktree already exists, create a fresh uniquely
+named branch and dedicated worktree unless the user explicitly asks to
+continue the existing one. Treat sibling worktrees and their untracked files
+as unrelated user work; do not inspect, rely on, modify, or delete them unless
+explicitly requested.
 
 ## Current State
 
@@ -22,25 +32,25 @@ Each implementation PR should:
 - Done: ordering quality benchmark metrics, merged as PR #20.
 - Done: deterministic static feature extraction, merged as PR #21.
 
-The remaining work starts from the merged feature extractor. PR 4 is the recommended next PR, but it has not started yet. It should not add neural-network inference; it should add the smallest scorer interface that can consume sparse `FeatureId` lists and affect ordering only in an explicit mode.
+The remaining work starts from the merged feature extractor. PR 4 is the current implementation PR. It should not add neural-network inference; it should add the smallest scorer interface that can consume sparse `FeatureId` lists and affect ordering only in an explicit mode.
 
 ## Remaining PRs
 
-### [ ] PR 4: Baseline Learned-Score Interface
+### [x] PR 4: Baseline Learned-Score Interface
 
 - Suggested branch: `codex/issue-16-learned-score-interface`.
 - Purpose: introduce the model-neutral runtime seam between extracted features and move ordering.
 - Implementation:
-  - [ ] Define a small integer scorer interface over candidate features or child positions.
-  - [ ] Add a trivial fixture scorer for tests, such as all-zero scores or a hand-written deterministic table.
-  - [ ] Integrate score-based tie-breaking behind an explicit opt-in mode.
-  - [ ] Keep current default ordering unchanged.
+  - [x] Define a small integer scorer interface over candidate features or child positions.
+  - [x] Add a trivial fixture scorer for tests, such as all-zero scores or a hand-written deterministic table.
+  - [x] Integrate score-based tie-breaking behind an explicit opt-in mode.
+  - [x] Keep current default ordering unchanged.
 - Functional test:
   - Run `mate_solver` in default mode and fixture-score mode on SFENs where candidate ordering can differ.
   - Inspect verbose output or benchmark metrics to confirm fixture scoring affects only explicitly enabled runs.
 - Self review:
-  - Add automated tests proving default ordering remains unchanged.
-  - Add tests proving fixture scores change order only under the opt-in mode.
+  - [x] Add automated tests proving default ordering remains unchanged.
+  - [x] Add tests proving fixture scores change order only under the opt-in mode.
   - Confirm the interface does not commit the project to a specific NNUE architecture or file format.
 
 ### [ ] PR 5: NNUE-Style Inference Runtime
@@ -58,7 +68,7 @@ The remaining work starts from the merged feature extractor. PR 4 is the recomme
   - Rerun the same command and confirm identical output.
   - If file loading exists, try invalid and missing model inputs.
 - Self review:
-  - Add inference arithmetic tests and deterministic ordering tests.
+  - [ ] Add inference arithmetic tests and deterministic ordering tests.
   - Run a release-mode benchmark smoke test.
   - Measure release binary size before and after if a model or dependency is embedded.
   - Confirm model/mode selection is explicit and default behavior remains unchanged.
@@ -77,7 +87,7 @@ The remaining work starts from the merged feature extractor. PR 4 is the recomme
   - Inspect generated examples and exported weights.
   - Load the exported fixture through the runtime path and confirm it produces usable output.
 - Self review:
-  - Add smoke or round-trip tests.
+  - [ ] Add smoke or round-trip tests.
   - Confirm training dependencies are separate from solver runtime dependencies.
   - Confirm generated artifacts are either intentionally committed small fixtures or ignored/external.
 

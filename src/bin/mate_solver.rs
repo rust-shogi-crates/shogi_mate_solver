@@ -9,7 +9,7 @@ use std::{
 use mate_solver::df_pn::search as dfpnsearch;
 use mate_solver::eval::Value;
 use mate_solver::eval::search as evalsearch;
-use mate_solver::move_ordering::MoveOrderingOptions;
+use mate_solver::move_ordering::{MoveOrderingMode, MoveOrderingOptions};
 use mate_solver::position_wrapper::PositionWrapper;
 use mate_solver::tt::{DfPnTable, EvalTable};
 use shogi_core::{Move, PartialPosition, Position, ToUsi};
@@ -49,6 +49,13 @@ fn parse_args() -> Opts {
     for a in args {
         if a == "--verbose" {
             opts.verbose = true;
+        }
+        if let Some(rest) = a.strip_prefix("--move-ordering=") {
+            opts.move_ordering.mode = match rest {
+                "current" => MoveOrderingMode::Current,
+                "fixture" => MoveOrderingMode::FixtureScore,
+                _ => panic!(),
+            };
         }
         if a == "--output=json" {
             opts.output = Output::Json;
