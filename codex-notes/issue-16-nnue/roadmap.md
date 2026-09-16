@@ -165,15 +165,23 @@ The intended first useful outcome is not "NNUE replaces search". The solver shou
 - Notes:
   - This PR should be evidence-driven. If the model does not improve search work or runtime, do not enable it by default.
 
-## Recommended First PR
+## Current Progress
 
-Start with PR 1, the move-ordering abstraction. It gives later NNUE work a controlled insertion point and lets tests prove that no behavior changes before learned scoring is introduced.
+- PR 1: Move-ordering abstraction was merged as PR #18.
+- Supporting work: root search stats exposure was merged as PR #19.
+- PR 2: ordering metrics and benchmark fixtures were merged as PR #20.
+- PR 3: static feature extraction was merged as PR #21.
 
-The first PR-specific plan should answer:
+## Recommended Next PR
 
-- What exact ordering helper type/function will be introduced?
-- How will df-pn child selection preserve current proof/disproof semantics?
-- How will eval search avoid recomputing child positions more than necessary?
+Start with PR 4, the baseline learned-score interface. It is the next controlled insertion point after feature extraction: it should let a scorer consume sparse feature IDs and affect candidate ordering only through an explicit opt-in mode.
+
+The next PR-specific plan should answer:
+
+- What scorer trait or function shape will be introduced?
+- Will the scorer receive candidate feature IDs, a move plus position, or a precomputed candidate object?
+- Where will score-based tie-breaking be integrated in df-pn and eval search?
+- What fixture scorer proves the wiring without committing to NNUE internals?
 - What tests prove default behavior is unchanged?
 
 ## Cross-PR Design Decisions
@@ -198,5 +206,7 @@ The first PR-specific plan should answer:
 
 - Research: `codex-notes/issue-16-nnue/research.md`
 - Roadmap: `codex-notes/issue-16-nnue/roadmap.md`
+- Issue-level plan: `codex-notes/issue-16-nnue/plan.md`
+- Checklist: `codex-notes/issue-16-nnue/pr-checklist.md`
 
-No PR-specific `plan.md` or `feature_list.json` exists yet. Create those only after choosing the first PR-sized milestone.
+PR-specific notes should still be created in each PR branch. This directory contains issue-level guidance that is intended to remain on `main`.
