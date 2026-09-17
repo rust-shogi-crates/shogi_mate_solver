@@ -10,7 +10,8 @@ use std::{
 use mate_solver::{
     df_pn::search as dfpnsearch,
     eval::{Value, search as evalsearch},
-    move_ordering::{MoveOrderingOptions, order_df_pn_moves, order_eval_moves},
+    features::FeatureRole,
+    move_ordering::{MoveOrderingOptions, order_df_pn_moves, order_eval_moves_with_role},
     position_wrapper::PositionWrapper,
     tt::{DfPnTable, EvalTable},
 };
@@ -410,13 +411,24 @@ struct RootOrderingResult {
 
 fn ordered_df_pn_root_moves(position: &PositionWrapper) -> Vec<Move> {
     let mut moves = position.all_checks();
-    order_df_pn_moves(&mut moves, &MoveOrderingOptions::default());
+    order_df_pn_moves(
+        &mut moves,
+        position,
+        FeatureRole::Attacker,
+        &MoveOrderingOptions::default(),
+    );
     moves
 }
 
 fn ordered_eval_root_moves(position: &PositionWrapper, df_pn: &DfPnTable) -> Vec<Move> {
     let mut moves = position.all_checks();
-    order_eval_moves(&mut moves, position, df_pn, &MoveOrderingOptions::default());
+    order_eval_moves_with_role(
+        &mut moves,
+        position,
+        df_pn,
+        FeatureRole::Attacker,
+        &MoveOrderingOptions::default(),
+    );
     moves
 }
 

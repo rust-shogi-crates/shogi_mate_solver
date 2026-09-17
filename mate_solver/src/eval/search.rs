@@ -2,7 +2,8 @@ use shogi_core::{Hand, Move, PartialPosition, Piece, ToUsi};
 use std::collections::BTreeSet;
 
 use crate::{
-    move_ordering::{order_eval_moves, MoveOrderingOptions},
+    features::FeatureRole,
+    move_ordering::{order_eval_moves_with_role, MoveOrderingOptions},
     position_wrapper::{Key, PositionWrapper},
     tt::{DfPnTable, EvalTable},
 };
@@ -275,7 +276,13 @@ pub fn alpha_beta_me_with_options_and_stats(
     }
     seen.insert(position.zobrist_hash());
 
-    order_eval_moves(&mut all, position, df_pn, move_ordering);
+    order_eval_moves_with_role(
+        &mut all,
+        position,
+        df_pn,
+        FeatureRole::Attacker,
+        move_ordering,
+    );
 
     let mut best = None;
     for mv in all {
@@ -474,7 +481,13 @@ pub fn alpha_beta_you_with_options_and_stats(
     }
     seen.insert(position.zobrist_hash());
 
-    order_eval_moves(&mut all, position, df_pn, move_ordering);
+    order_eval_moves_with_role(
+        &mut all,
+        position,
+        df_pn,
+        FeatureRole::Defender,
+        move_ordering,
+    );
 
     let mut best = None;
     for &mv in &all {

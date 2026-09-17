@@ -3,6 +3,7 @@
 use shogi_core::{Move, Square};
 
 use crate::{
+    features::FeatureRole,
     move_ordering::{order_df_pn_moves, MoveOrderingOptions},
     position_wrapper::{Key, PositionWrapper},
     tt::DfPnTable,
@@ -222,7 +223,11 @@ pub fn mid_with_options_and_stats(
         put_in_hash(dfpn_tbl, position.zobrist_hash(), (u32::MAX, 0));
         return (u32::MAX, 0);
     }
-    order_df_pn_moves(&mut moves, move_ordering);
+    let role = match node_kind {
+        NodeKind::Or => FeatureRole::Attacker,
+        NodeKind::And => FeatureRole::Defender,
+    };
+    order_df_pn_moves(&mut moves, position, role, move_ordering);
     let mut children = vec![];
     for mv in moves {
         let mut cp = position.clone();
