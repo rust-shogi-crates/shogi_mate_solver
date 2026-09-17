@@ -2,6 +2,7 @@ use shogi_core::Move;
 
 use crate::{
     features::{candidate_features, FeatureId, FeatureRole},
+    nnue::NnueScorer,
     position_wrapper::PositionWrapper,
     tt::DfPnTable,
 };
@@ -13,6 +14,33 @@ pub trait FeatureScorer {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FixtureScorer {
     entries: &'static [(FeatureId, i32)],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MoveOrderingScorer {
+    Fixture(FixtureScorer),
+    Nnue(NnueScorer),
+}
+
+impl Default for MoveOrderingScorer {
+    fn default() -> Self {
+        Self::Fixture(FixtureScorer::default())
+    }
+}
+
+impl FeatureScorer for MoveOrderingScorer {
+    fn score(&self, features: &[FeatureId]) -> i32 {
+        match self {
+            Self::Fixture(scorer) => scorer.score(features),
+            Self::Nnue(scorer) => scorer.score(features),
+        }
+    }
+}
+
+impl FeatureScorer for NnueScorer {
+    fn score(&self, features: &[FeatureId]) -> i32 {
+        NnueScorer::score(self, features)
+    }
 }
 
 impl FixtureScorer {
@@ -42,7 +70,7 @@ impl FeatureScorer for FixtureScorer {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct MoveOrderingOptions {
     pub mode: MoveOrderingMode,
-    pub scorer: FixtureScorer,
+    pub scorer: MoveOrderingScorer,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -51,6 +79,7 @@ pub enum MoveOrderingMode {
     #[default]
     Current,
     FixtureScore,
+    NnueFixture,
 }
 
 pub fn order_df_pn_moves(
@@ -99,7 +128,7 @@ pub fn order_eval_moves_with_role(
                 1
             }
         }),
-        MoveOrderingMode::FixtureScore => {
+        MoveOrderingMode::FixtureScore | MoveOrderingMode::NnueFixture => {
             let mut ordered: Vec<_> = moves
                 .iter()
                 .copied()
@@ -216,7 +245,33 @@ mod tests {
         let mut moves = [other, preferred];
         let options = MoveOrderingOptions {
             mode: MoveOrderingMode::FixtureScore,
-            scorer: FixtureScorer::default(),
+            scorer: MoveOrderingScorer::Fixture(FixtureScorer::default()),
+        };
+
+        order_df_pn_moves(&mut moves, &position, FeatureRole::Attacker, &options);
+
+        assert_eq!(moves, [preferred, other]);
+    }
+
+    #[test]
+    fn nnue_fixture_score_breaks_ties_without_changing_primary_order() {
+        let position = PositionWrapper::new(
+            PartialPosition::from_usi("sfen 9/9/9/9/9/9/9/9/9 b GS 1").unwrap(),
+        );
+        let preferred = Move::Normal {
+            from: Square::SQ_5I,
+            to: Square::SQ_5H,
+            promote: true,
+        };
+        let other = Move::Normal {
+            from: Square::SQ_5I,
+            to: Square::SQ_4H,
+            promote: false,
+        };
+        let mut moves = [other, preferred];
+        let options = MoveOrderingOptions {
+            mode: MoveOrderingMode::NnueFixture,
+            scorer: MoveOrderingScorer::Nnue(NnueScorer::default()),
         };
 
         order_df_pn_moves(&mut moves, &position, FeatureRole::Attacker, &options);

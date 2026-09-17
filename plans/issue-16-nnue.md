@@ -32,7 +32,7 @@ explicitly requested.
 - Done: ordering quality benchmark metrics, merged as PR #20.
 - Done: deterministic static feature extraction, merged as PR #21.
 
-The remaining work starts from the merged feature extractor. PR 4 is the current implementation PR. It should not add neural-network inference; it should add the smallest scorer interface that can consume sparse `FeatureId` lists and affect ordering only in an explicit mode.
+The remaining work starts from the merged feature extractor. PR 5 is the current implementation PR. It adds a small deterministic NNUE-style runtime without committing to a file format or external inference dependency.
 
 ## Remaining PRs
 
@@ -53,22 +53,22 @@ The remaining work starts from the merged feature extractor. PR 4 is the current
   - [x] Add tests proving fixture scores change order only under the opt-in mode.
   - Confirm the interface does not commit the project to a specific NNUE architecture or file format.
 
-### [ ] PR 5: NNUE-Style Inference Runtime
+### [x] PR 5: NNUE-Style Inference Runtime
 
-- Suggested branch: `codex/issue-16-nnue-inference`.
+- Suggested branch: `codex/issue-16-pr5-nnue-inference`.
 - Purpose: add deterministic runtime inference suitable for move ordering.
 - Implementation:
-  - [ ] Decide whether fixture weights are embedded Rust constants or loaded from a file.
-  - [ ] Get approval before adding runtime dependencies for serialization, numeric arrays, or model loading.
-  - [ ] Add minimal fixed-point or integer NNUE-style inference.
-  - [ ] Add a tiny non-quality fixture model for correctness tests.
+  - [x] Decide whether fixture weights are embedded Rust constants or loaded from a file.
+  - [x] Get approval before adding runtime dependencies for serialization, numeric arrays, or model loading.
+  - [x] Add minimal fixed-point or integer NNUE-style inference.
+  - [x] Add a tiny non-quality fixture model for correctness tests.
 - Functional test:
   - Run `mate_solver` with the fixture NNUE mode on selected SFENs.
   - Inspect selected move/order diagnostics.
   - Rerun the same command and confirm identical output.
   - If file loading exists, try invalid and missing model inputs.
 - Self review:
-  - [ ] Add inference arithmetic tests and deterministic ordering tests.
+  - [x] Add inference arithmetic tests and deterministic ordering tests.
   - Run a release-mode benchmark smoke test.
   - Measure release binary size before and after if a model or dependency is embedded.
   - Confirm model/mode selection is explicit and default behavior remains unchanged.
