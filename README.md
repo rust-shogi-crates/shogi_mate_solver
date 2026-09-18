@@ -77,4 +77,4 @@ cargo run --release -p nnue_training -- score --model /tmp/nnue-model.nnue --exa
 
 export された `NNUE-FIXTURE 1` テキストモデルは `mate_solver::nnue::NnueScorer::from_model` で読み込まれます。学習用の依存関係は独立した `nnue_training` crate に分離されており、solver のランタイム依存関係には含まれません。
 
-`--mirror` は SFEN と指し手を変換した左右対称の例を追加します。`--plies=N` は決定的な合法手順を N 手進め、evaluator を再実行して新しい label を付け、各例に元の ID、変換方法、進めた手数を記録します。攻め方の候補手を生成するため、`N` は攻め方の手番に戻る偶数を指定します。
+`--mirror` は SFEN と指し手を変換した左右対称の例を追加します。`--plies=N` は決定的な合法手順を N 手進め、evaluator を再実行して新しい label を付け、各例に元の ID、変換方法、進めた手数を記録します。偶数の `N` では攻め方、奇数の `N` では玉方の候補手を生成します。

@@ -199,14 +199,29 @@ fn append_examples(
             .map_err(|error| format!("invalid SFEN for {source_id}: {error:?}"))?,
     );
     let id = format!("{source_id}::{transform}::ply{ply_offset}");
-    for mv in wrapped.all_checks() {
+    let role = if ply_offset.is_multiple_of(2) {
+        FeatureRole::Attacker
+    } else {
+        FeatureRole::Defender
+    };
+    let role_name = match role {
+        FeatureRole::Attacker => "attacker",
+        FeatureRole::Defender => "defender",
+        _ => return Err("unsupported feature role".to_owned()),
+    };
+    let moves = match role {
+        FeatureRole::Attacker => wrapped.all_checks(),
+        FeatureRole::Defender => wrapped.all_evasions(),
+        _ => return Err("unsupported feature role".to_owned()),
+    };
+    for mv in moves {
         let move_usi = mv.to_usi_owned();
         let example = TrainingExample {
             id: id.clone(),
             source_id: source_id.to_owned(),
             sfen: sfen.to_owned(),
             evaluator: evaluator.to_owned(),
-            role: "attacker".to_owned(),
+            role: role_name.to_owned(),
             move_usi: move_usi.clone(),
             label: u8::from(move_usi == chosen_move),
             transform: transform.to_owned(),
@@ -532,5 +547,26 @@ mod tests {
         assert_eq!(example.source_id, "");
         assert_eq!(example.transform, "identity");
         assert_eq!(example.ply_offset, 0);
+    }
+
+    #[test]
+    fn defender_examples_use_legal_moves() {
+        let mut output = String::new();
+        append_examples(
+            &mut output,
+            "source",
+            "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL w - 2",
+            "3g3f",
+            "eval",
+            "replay",
+            1,
+        )
+        .unwrap();
+        let examples: Vec<TrainingExample> = output
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert!(!examples.is_empty());
+        assert!(examples.iter().all(|example| example.role == "defender"));
     }
 }
