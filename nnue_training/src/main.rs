@@ -1,9 +1,15 @@
-use std::{collections::BTreeMap, env, fs, process};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    env, fs, process,
+};
 
 use mate_solver::{
+    eval::{Value, search as evalsearch},
     features::{FeatureId, FeatureRole, candidate_features},
+    move_ordering::MoveOrderingOptions,
     nnue::NnueScorer,
     position_wrapper::PositionWrapper,
+    tt::{DfPnTable, EvalTable},
 };
 use serde::{Deserialize, Serialize};
 use shogi_core::{Move, PartialPosition, ToUsi};
@@ -29,11 +35,14 @@ struct SearchRecord {
 #[derive(Serialize, Deserialize)]
 struct TrainingExample {
     id: String,
+    source_id: String,
     sfen: String,
     evaluator: String,
     role: String,
     move_usi: String,
     label: u8,
+    transform: String,
+    ply_offset: usize,
 }
 
 fn main() {
@@ -59,7 +68,7 @@ fn run() -> Result<(), String> {
 fn print_usage() {
     eprintln!("usage:");
     eprintln!(
-        "  nnue_training examples --positions <positions.jsonl> --results <results.jsonl> --output <examples.jsonl> [--evaluator=eval]"
+        "  nnue_training examples --positions <positions.jsonl> --results <results.jsonl> --output <examples.jsonl> [--evaluator=eval] [--mirror] [--plies=<count>]"
     );
     eprintln!(
         "  nnue_training export --examples <examples.jsonl> --output <model.nnue> [--limit=<count>]"
@@ -72,6 +81,8 @@ fn generate_examples(args: &mut impl Iterator<Item = String>) -> Result<(), Stri
     let mut results_path = None;
     let mut output_path = None;
     let mut evaluator = "eval".to_owned();
+    let mut mirror = false;
+    let mut plies = 0usize;
 
     while let Some(arg) = args.next() {
         if let Some(value) = arg.strip_prefix("--positions=") {
@@ -88,6 +99,12 @@ fn generate_examples(args: &mut impl Iterator<Item = String>) -> Result<(), Stri
             output_path = Some(next_arg(args, "--output")?);
         } else if let Some(value) = arg.strip_prefix("--evaluator=") {
             evaluator = value.to_owned();
+        } else if arg == "--mirror" {
+            mirror = true;
+        } else if let Some(value) = arg.strip_prefix("--plies=") {
+            plies = value
+                .parse()
+                .map_err(|error| format!("invalid --plies: {error}"))?;
         } else {
             return Err(format!("unknown argument: {arg}"));
         }
@@ -104,34 +121,217 @@ fn generate_examples(args: &mut impl Iterator<Item = String>) -> Result<(), Stri
         let id = position
             .id
             .unwrap_or_else(|| format!("{positions_path}:{}", line + 1));
-        let Some(chosen_move) = results
+        let Some(source_chosen_move) = results
             .get(&id)
             .and_then(|record| record.root_chosen_move.as_ref())
         else {
             continue;
         };
-        let wrapped = PositionWrapper::new(
-            PartialPosition::from_usi(&format!("sfen {}", position.sfen))
-                .map_err(|error| format!("invalid SFEN for {id}: {error:?}"))?,
-        );
-        for mv in wrapped.all_checks() {
-            let example = TrainingExample {
-                id: id.clone(),
-                sfen: position.sfen.clone(),
-                evaluator: evaluator.clone(),
-                role: "attacker".to_owned(),
-                move_usi: mv.to_usi_owned(),
-                label: u8::from(mv.to_usi_owned() == *chosen_move),
-            };
-            output.push_str(
-                &serde_json::to_string(&example)
-                    .map_err(|error| format!("serialize example: {error}"))?,
-            );
-            output.push('\n');
+        append_examples(
+            &mut output,
+            &id,
+            &position.sfen,
+            source_chosen_move,
+            &evaluator,
+            "identity",
+            0,
+        )?;
+        if mirror {
+            append_examples(
+                &mut output,
+                &id,
+                &mirror_sfen(&position.sfen)?,
+                &mirror_move(source_chosen_move)?,
+                &evaluator,
+                "mirror",
+                0,
+            )?;
+        }
+        if plies > 0 {
+            let position = PartialPosition::from_usi(&format!("sfen {}", position.sfen))
+                .map_err(|error| format!("invalid SFEN for {id}: {error:?}"))?;
+            if let Some((sfen, chosen_move)) = replay_and_label(&position, plies) {
+                append_examples(
+                    &mut output,
+                    &id,
+                    &sfen,
+                    &chosen_move,
+                    &evaluator,
+                    "replay",
+                    plies,
+                )?;
+                if mirror {
+                    append_examples(
+                        &mut output,
+                        &id,
+                        &mirror_sfen(&sfen)?,
+                        &mirror_move(&chosen_move)?,
+                        &evaluator,
+                        "replay+mirror",
+                        plies,
+                    )?;
+                }
+            }
         }
     }
 
     fs::write(&output_path, output).map_err(|error| format!("write {output_path}: {error}"))
+}
+
+fn append_examples(
+    output: &mut String,
+    source_id: &str,
+    sfen: &str,
+    chosen_move: &str,
+    evaluator: &str,
+    transform: &str,
+    ply_offset: usize,
+) -> Result<(), String> {
+    let wrapped = PositionWrapper::new(
+        PartialPosition::from_usi(&format!("sfen {sfen}"))
+            .map_err(|error| format!("invalid SFEN for {source_id}: {error:?}"))?,
+    );
+    let id = format!("{source_id}::{transform}::ply{ply_offset}");
+    for mv in wrapped.all_checks() {
+        let move_usi = mv.to_usi_owned();
+        let example = TrainingExample {
+            id: id.clone(),
+            source_id: source_id.to_owned(),
+            sfen: sfen.to_owned(),
+            evaluator: evaluator.to_owned(),
+            role: "attacker".to_owned(),
+            move_usi: move_usi.clone(),
+            label: u8::from(move_usi == chosen_move),
+            transform: transform.to_owned(),
+            ply_offset,
+        };
+        output.push_str(
+            &serde_json::to_string(&example)
+                .map_err(|error| format!("serialize example: {error}"))?,
+        );
+        output.push('\n');
+    }
+    Ok(())
+}
+
+fn replay_and_label(position: &PartialPosition, plies: usize) -> Option<(String, String)> {
+    let mut wrapped = PositionWrapper::new(position.clone());
+    for ply in 0..plies {
+        let mv = if ply % 2 == 0 {
+            wrapped.all_checks().into_iter().next()?
+        } else {
+            wrapped.all_evasions().into_iter().next()?
+        };
+        wrapped.make_move(mv);
+    }
+
+    let mut df_pn = DfPnTable::new(1 << 16);
+    let mut eval = EvalTable::new(1 << 16);
+    let (_, best_move) = evalsearch::alpha_beta_me_with_options_and_stats(
+        &wrapped,
+        &mut df_pn,
+        &mut eval,
+        Value::ZERO,
+        // Augmentation labels use a bounded search so replay cannot turn
+        // example generation into an unbounded solver run.
+        Value::new(6, 0, 0),
+        &mut BTreeSet::new(),
+        &mut Default::default(),
+        false,
+        &mut Default::default(),
+        &mut Default::default(),
+        &MoveOrderingOptions::default(),
+    );
+    Some((wrapped.inner().to_sfen_owned(), best_move?.to_usi_owned()))
+}
+
+fn mirror_sfen(sfen: &str) -> Result<String, String> {
+    let mut fields = sfen.split_whitespace();
+    let board = fields.next().ok_or("missing SFEN board")?;
+    let side = fields.next().ok_or("missing SFEN side")?;
+    let hand = fields.next().ok_or("missing SFEN hand")?;
+    let ply = fields.next().ok_or("missing SFEN ply")?;
+    let mirrored_board = board
+        .split('/')
+        .map(mirror_rank)
+        .collect::<Result<Vec<_>, _>>()?
+        .join("/");
+    Ok(format!("{mirrored_board} {side} {hand} {ply}"))
+}
+
+fn mirror_rank(rank: &str) -> Result<String, String> {
+    let mut cells = Vec::new();
+    let mut chars = rank.chars();
+    while let Some(ch) = chars.next() {
+        if ch.is_ascii_digit() {
+            cells.extend(std::iter::repeat_n(None, ch.to_digit(10).unwrap() as usize));
+        } else if ch == '+' {
+            let piece = chars.next().ok_or("incomplete promoted piece")?;
+            cells.push(Some(format!("+{piece}")));
+        } else {
+            cells.push(Some(ch.to_string()));
+        }
+    }
+    if cells.len() != 9 {
+        return Err(format!("SFEN rank has {} squares", cells.len()));
+    }
+    let mut mirrored = String::new();
+    let mut empty = 0;
+    for cell in cells.into_iter().rev() {
+        match cell {
+            Some(piece) => {
+                if empty > 0 {
+                    mirrored.push_str(&empty.to_string());
+                    empty = 0;
+                }
+                mirrored.push_str(&piece);
+            }
+            None => empty += 1,
+        }
+    }
+    if empty > 0 {
+        mirrored.push_str(&empty.to_string());
+    }
+    Ok(mirrored)
+}
+
+fn mirror_move(move_usi: &str) -> Result<String, String> {
+    if move_usi.len() < 4 {
+        return Err(format!("invalid USI move: {move_usi}"));
+    }
+    if move_usi.as_bytes().get(1) == Some(&b'*') {
+        return Ok(format!(
+            "{}*{}",
+            &move_usi[..1],
+            mirror_square(&move_usi[2..4])?
+        ));
+    }
+    let suffix = &move_usi[4..];
+    Ok(format!(
+        "{}{}{}{}{}",
+        mirror_file(&move_usi[0..1])?,
+        &move_usi[1..2],
+        mirror_file(&move_usi[2..3])?,
+        &move_usi[3..4],
+        suffix
+    ))
+}
+
+fn mirror_square(square: &str) -> Result<String, String> {
+    if square.len() != 2 {
+        return Err(format!("invalid USI square: {square}"));
+    }
+    Ok(format!("{}{}", mirror_file(&square[0..1])?, &square[1..2]))
+}
+
+fn mirror_file(file: &str) -> Result<String, String> {
+    let digit = file
+        .parse::<u8>()
+        .map_err(|error| format!("invalid USI file {file}: {error}"))?;
+    if !(1..=9).contains(&digit) {
+        return Err(format!("invalid USI file {file}"));
+    }
+    Ok(char::from(b'0' + 10 - digit).to_string())
 }
 
 fn export_model(args: &mut impl Iterator<Item = String>) -> Result<(), String> {
@@ -300,4 +500,19 @@ fn read_results(path: &str, evaluator: &str) -> Result<BTreeMap<String, SearchRe
 fn next_arg(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {
     args.next()
         .ok_or_else(|| format!("missing value for {flag}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mirror_transforms_sfen_and_moves() {
+        assert_eq!(mirror_move("G*5a").unwrap(), "G*5a");
+        assert_eq!(mirror_move("2d4b+").unwrap(), "8d6b+");
+        assert_eq!(
+            mirror_sfen("3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1").unwrap(),
+            "2sk1g3/2g6/4S4/1B7/9/9/9/9/9 b G2rbg2s4n4l18p 1"
+        );
+    }
 }

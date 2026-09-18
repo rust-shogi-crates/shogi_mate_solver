@@ -70,9 +70,11 @@ cargo run -p benchmark_harness -- compare --base benchmark-base.jsonl --current 
 
 ```
 cargo run --release -p benchmark_harness -- run --strict --move-ordering=nnue-fixture --revision=fixture benchmark/issue16-ordering.jsonl > /tmp/benchmark-results.jsonl
-cargo run --release -p nnue_training -- examples --positions benchmark/issue16-ordering.jsonl --results /tmp/benchmark-results.jsonl --output /tmp/nnue-examples.jsonl --evaluator=eval
+cargo run --release -p nnue_training -- examples --positions benchmark/issue16-ordering.jsonl --results /tmp/benchmark-results.jsonl --output /tmp/nnue-examples.jsonl --evaluator=eval --mirror --plies=2
 cargo run --release -p nnue_training -- export --examples /tmp/nnue-examples.jsonl --output /tmp/nnue-model.nnue
 cargo run --release -p nnue_training -- score --model /tmp/nnue-model.nnue --examples /tmp/nnue-examples.jsonl
 ```
 
 export された `NNUE-FIXTURE 1` テキストモデルは `mate_solver::nnue::NnueScorer::from_model` で読み込まれます。学習用の依存関係は独立した `nnue_training` crate に分離されており、solver のランタイム依存関係には含まれません。
+
+`--mirror` は SFEN と指し手を変換した左右対称の例を追加します。`--plies=N` は決定的な合法手順を N 手進め、evaluator を再実行して新しい label を付け、各例に元の ID、変換方法、進めた手数を記録します。攻め方の候補手を生成するため、`N` は攻め方の手番に戻る偶数を指定します。
