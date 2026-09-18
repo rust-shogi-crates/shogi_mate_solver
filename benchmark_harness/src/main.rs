@@ -11,7 +11,11 @@ use mate_solver::{
     df_pn::search as dfpnsearch,
     eval::{Value, search as evalsearch},
     features::FeatureRole,
-    move_ordering::{MoveOrderingOptions, order_df_pn_moves, order_eval_moves_with_role},
+    move_ordering::{
+        FixtureScorer, MoveOrderingMode, MoveOrderingOptions, MoveOrderingScorer,
+        order_df_pn_moves, order_eval_moves_with_role,
+    },
+    nnue::NnueScorer,
     position_wrapper::PositionWrapper,
     tt::{DfPnTable, EvalTable},
 };
@@ -156,7 +160,7 @@ fn run() -> Result<(), ()> {
 fn print_usage() {
     eprintln!("usage:");
     eprintln!(
-        "  benchmark_harness run [--strict] [--verbose] [--revision=<label>] <positions.jsonl>..."
+        "  benchmark_harness run [--strict] [--verbose] [--move-ordering=<mode>] [--revision=<label>] <positions.jsonl>..."
     );
     eprintln!(
         "  benchmark_harness compare --base <base.jsonl> --current <current.jsonl> [--html <report.html>]"
@@ -167,6 +171,7 @@ fn run_benchmark(args: &[String]) -> Result<(), ()> {
     let mut revision = "current".to_owned();
     let mut strict = false;
     let mut verbose = false;
+    let mut move_ordering = MoveOrderingOptions::default();
     let mut inputs = Vec::new();
 
     for arg in args {
@@ -174,6 +179,22 @@ fn run_benchmark(args: &[String]) -> Result<(), ()> {
             strict = true;
         } else if arg == "--verbose" {
             verbose = true;
+        } else if let Some(mode) = arg.strip_prefix("--move-ordering=") {
+            move_ordering = match mode {
+                "current" => MoveOrderingOptions::default(),
+                "fixture" => MoveOrderingOptions {
+                    mode: MoveOrderingMode::FixtureScore,
+                    scorer: MoveOrderingScorer::Fixture(FixtureScorer::default()),
+                },
+                "nnue-fixture" => MoveOrderingOptions {
+                    mode: MoveOrderingMode::NnueFixture,
+                    scorer: MoveOrderingScorer::Nnue(NnueScorer::default()),
+                },
+                _ => {
+                    eprintln!("unknown move ordering mode: {mode}");
+                    return Err(());
+                }
+            };
         } else if let Some(rest) = arg.strip_prefix("--revision=") {
             revision = rest.to_owned();
         } else {
@@ -227,7 +248,7 @@ fn run_benchmark(args: &[String]) -> Result<(), ()> {
                     continue;
                 }
             };
-            if let Err(message) = evaluate_position(&record, verbose) {
+            if let Err(message) = evaluate_position(&record, verbose, &move_ordering) {
                 emit_error(&input, line_number, "evaluate", message, &raw_line);
                 failed = true;
             }
@@ -290,23 +311,37 @@ fn parse_position_record(
     })
 }
 
-fn evaluate_position(record: &PositionRecord, verbose: bool) -> Result<(), String> {
+fn evaluate_position(
+    record: &PositionRecord,
+    verbose: bool,
+    move_ordering: &MoveOrderingOptions,
+) -> Result<(), String> {
     let position = PartialPosition::from_usi(&format!("sfen {}", record.sfen))
         .map_err(|error| format!("invalid SFEN: {error:?}"))?;
-    evaluate_df_pn(record, &position, verbose);
-    evaluate_eval(record, &position, verbose);
+    evaluate_df_pn(record, &position, verbose, move_ordering);
+    evaluate_eval(record, &position, verbose, move_ordering);
     Ok(())
 }
 
-fn evaluate_df_pn(record: &PositionRecord, position: &PartialPosition, verbose: bool) {
+fn evaluate_df_pn(
+    record: &PositionRecord,
+    position: &PartialPosition,
+    verbose: bool,
+    move_ordering: &MoveOrderingOptions,
+) {
     let mut df_pn = DfPnTable::new(TABLE_SIZE);
     let mut stats = dfpnsearch::SearchStats::default();
     let wrapped = PositionWrapper::new(position.clone());
-    let ordered_root_moves = ordered_df_pn_root_moves(&wrapped);
+    let ordered_root_moves = ordered_df_pn_root_moves(&wrapped, move_ordering);
     let root_candidate_moves = ordered_root_moves.len() as u64;
     let started = Instant::now();
-    let (proof_number, disproof_number) =
-        dfpnsearch::df_pn_with_stats(&mut df_pn, &wrapped, verbose, &mut stats);
+    let (proof_number, disproof_number) = dfpnsearch::df_pn_with_options_and_stats(
+        &mut df_pn,
+        &wrapped,
+        verbose,
+        &mut stats,
+        move_ordering,
+    );
     let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
     let resolution = if (proof_number, disproof_number) == (u32::MAX, 0) {
         Expected::NoMate
@@ -341,18 +376,29 @@ fn evaluate_df_pn(record: &PositionRecord, position: &PartialPosition, verbose: 
     );
 }
 
-fn evaluate_eval(record: &PositionRecord, position: &PartialPosition, verbose: bool) {
+fn evaluate_eval(
+    record: &PositionRecord,
+    position: &PartialPosition,
+    verbose: bool,
+    move_ordering: &MoveOrderingOptions,
+) {
     let mut df_pn = DfPnTable::new(TABLE_SIZE);
     let mut eval = EvalTable::new(TABLE_SIZE);
     let mut seed_stats = dfpnsearch::SearchStats::default();
     let mut eval_stats = evalsearch::SearchStats::default();
     let wrapped = PositionWrapper::new(position.clone());
-    dfpnsearch::df_pn_with_stats(&mut df_pn, &wrapped, verbose, &mut seed_stats);
-    let ordered_root_moves = ordered_eval_root_moves(&wrapped, &df_pn);
+    dfpnsearch::df_pn_with_options_and_stats(
+        &mut df_pn,
+        &wrapped,
+        verbose,
+        &mut seed_stats,
+        move_ordering,
+    );
+    let ordered_root_moves = ordered_eval_root_moves(&wrapped, &df_pn, move_ordering);
     let root_candidate_moves = ordered_root_moves.len() as u64;
     let mut df_pn_stats = dfpnsearch::SearchStats::default();
     let started = Instant::now();
-    let (value, best_move) = evalsearch::alpha_beta_me_with_stats(
+    let (value, best_move) = evalsearch::alpha_beta_me_with_options_and_stats(
         &wrapped,
         &mut df_pn,
         &mut eval,
@@ -363,6 +409,7 @@ fn evaluate_eval(record: &PositionRecord, position: &PartialPosition, verbose: b
         verbose,
         &mut eval_stats,
         &mut df_pn_stats,
+        move_ordering,
     );
     let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
     let resolution = if value.is_mate() {
@@ -409,25 +456,27 @@ struct RootOrderingResult {
     first_candidate_chosen: Option<bool>,
 }
 
-fn ordered_df_pn_root_moves(position: &PositionWrapper) -> Vec<Move> {
+fn ordered_df_pn_root_moves(
+    position: &PositionWrapper,
+    move_ordering: &MoveOrderingOptions,
+) -> Vec<Move> {
     let mut moves = position.all_checks();
-    order_df_pn_moves(
-        &mut moves,
-        position,
-        FeatureRole::Attacker,
-        &MoveOrderingOptions::default(),
-    );
+    order_df_pn_moves(&mut moves, position, FeatureRole::Attacker, move_ordering);
     moves
 }
 
-fn ordered_eval_root_moves(position: &PositionWrapper, df_pn: &DfPnTable) -> Vec<Move> {
+fn ordered_eval_root_moves(
+    position: &PositionWrapper,
+    df_pn: &DfPnTable,
+    move_ordering: &MoveOrderingOptions,
+) -> Vec<Move> {
     let mut moves = position.all_checks();
     order_eval_moves_with_role(
         &mut moves,
         position,
         df_pn,
         FeatureRole::Attacker,
-        &MoveOrderingOptions::default(),
+        move_ordering,
     );
     moves
 }

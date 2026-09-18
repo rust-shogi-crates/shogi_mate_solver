@@ -4,6 +4,7 @@ mate_solver ==> 詰将棋を解く (SFEN 文字列を標準入力から 1 行で
 -  `--verbose` ==> 詳細な情報 (探索ノード数・実行時間など) を出力
 -  `--output=json` ==> 今風に JSON で出力
 -  `--move-format=traditional|official|kif|usi|csa` ==> 手の表示方法を変える
+-  `--move-ordering=current|fixture|nnue-fixture` ==> 手の順序付け方式を選ぶ
 
 実行例
 ```

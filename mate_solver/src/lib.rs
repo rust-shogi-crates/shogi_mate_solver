@@ -10,6 +10,7 @@ pub mod df_pn;
 pub mod eval;
 pub mod features;
 pub mod move_ordering;
+pub mod nnue;
 pub mod position_wrapper;
 pub mod tt;
 

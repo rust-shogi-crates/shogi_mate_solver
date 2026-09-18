@@ -9,7 +9,10 @@ use std::{
 use mate_solver::df_pn::search as dfpnsearch;
 use mate_solver::eval::Value;
 use mate_solver::eval::search as evalsearch;
-use mate_solver::move_ordering::{MoveOrderingMode, MoveOrderingOptions};
+use mate_solver::move_ordering::{
+    FixtureScorer, MoveOrderingMode, MoveOrderingOptions, MoveOrderingScorer,
+};
+use mate_solver::nnue::NnueScorer;
 use mate_solver::position_wrapper::PositionWrapper;
 use mate_solver::tt::{DfPnTable, EvalTable};
 use shogi_core::{Move, PartialPosition, Position, ToUsi};
@@ -53,7 +56,15 @@ fn parse_args() -> Opts {
         if let Some(rest) = a.strip_prefix("--move-ordering=") {
             opts.move_ordering.mode = match rest {
                 "current" => MoveOrderingMode::Current,
-                "fixture" => MoveOrderingMode::FixtureScore,
+                "fixture" => {
+                    opts.move_ordering.scorer =
+                        MoveOrderingScorer::Fixture(FixtureScorer::default());
+                    MoveOrderingMode::FixtureScore
+                }
+                "nnue-fixture" => {
+                    opts.move_ordering.scorer = MoveOrderingScorer::Nnue(NnueScorer::default());
+                    MoveOrderingMode::NnueFixture
+                }
                 _ => panic!(),
             };
         }
