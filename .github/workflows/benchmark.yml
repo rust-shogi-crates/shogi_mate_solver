@@ -28,12 +28,7 @@ jobs:
           mkdir -p benchmark-output
           cargo run --release --locked -p benchmark_harness -- run --strict --move-ordering=nnue-fixture --revision=current benchmark/issue13-ci.jsonl benchmark/issue16-ordering.jsonl > benchmark-output/benchmark-current.jsonl
           git worktree add /tmp/shogi-mate-solver-base origin/${BENCHMARK_BASE_REF}
-          base_move_ordering_args=()
-          if grep -q 'nnue-fixture' /tmp/shogi-mate-solver-base/benchmark_harness/src/main.rs; then
-            # Once PR 5 is merged, compare NNUE fixture ordering against NNUE fixture ordering.
-            base_move_ordering_args=(--move-ordering=nnue-fixture)
-          fi
-          cargo run --release --locked --manifest-path /tmp/shogi-mate-solver-base/Cargo.toml -p benchmark_harness -- run --strict "${base_move_ordering_args[@]}" --revision=base /tmp/shogi-mate-solver-base/benchmark/issue13-ci.jsonl > benchmark-output/benchmark-base.jsonl
+          cargo run --release --locked --manifest-path /tmp/shogi-mate-solver-base/Cargo.toml -p benchmark_harness -- run --strict --move-ordering=nnue-fixture --revision=base /tmp/shogi-mate-solver-base/benchmark/issue13-ci.jsonl > benchmark-output/benchmark-base.jsonl
           cargo run --release --locked -p benchmark_harness -- compare --base benchmark-output/benchmark-base.jsonl --current benchmark-output/benchmark-current.jsonl --html benchmark-output/benchmark-report.html > benchmark-output/benchmark-comparison.jsonl
       - uses: actions/upload-artifact@v7
         if: always()
