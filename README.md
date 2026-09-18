@@ -63,3 +63,16 @@ cargo run -p benchmark_harness -- compare --base benchmark-base.jsonl --current 
 `--html` を指定すると、同じ統計を人間が読みやすい HTML レポートにも出力する。
 
 エラーも同じ JSONL ストリームに出力される。CI では標準出力を `benchmark-base.jsonl`, `benchmark-current.jsonl`, `benchmark-comparison.jsonl` にリダイレクトし、`benchmark-report.html` と一緒に artifacts として保存する。
+
+# nnue_training
+
+`nnue_training` は benchmark の検索結果から小さな move-ordering 用の学習データを作り、ランタイム形式へ export する。学習例の label は、指定した evaluator が root で選んだ手を `1`、同じ局面の他の候補手を `0` とする。生成物は repository に commit しない。
+
+```
+cargo run --release -p benchmark_harness -- run --strict --move-ordering=nnue-fixture --revision=fixture benchmark/issue16-ordering.jsonl > /tmp/benchmark-results.jsonl
+cargo run --release -p nnue_training -- examples --positions benchmark/issue16-ordering.jsonl --results /tmp/benchmark-results.jsonl --output /tmp/nnue-examples.jsonl --evaluator=eval
+cargo run --release -p nnue_training -- export --examples /tmp/nnue-examples.jsonl --output /tmp/nnue-model.nnue
+cargo run --release -p nnue_training -- score --model /tmp/nnue-model.nnue --examples /tmp/nnue-examples.jsonl
+```
+
+export された `NNUE-FIXTURE 1` テキストモデルは `mate_solver::nnue::NnueScorer::from_model` で読み込まれます。学習用の依存関係は独立した `nnue_training` crate に分離されており、solver のランタイム依存関係には含まれません。

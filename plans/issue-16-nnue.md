@@ -31,8 +31,9 @@ explicitly requested.
 - Done: root search stats exposure, merged as PR #19.
 - Done: ordering quality benchmark metrics, merged as PR #20.
 - Done: deterministic static feature extraction, merged as PR #21.
+- Done: NNUE-style inference runtime, merged as PR #23.
 
-The remaining work starts from the merged feature extractor. PR 5 is the current implementation PR. It adds a small deterministic NNUE-style runtime without committing to a file format or external inference dependency.
+The remaining work starts from the merged NNUE runtime. PR 6 is the current implementation PR and adds the first training-example and export path without committing generated datasets or trained weights.
 
 ## Remaining PRs
 
@@ -73,21 +74,21 @@ The remaining work starts from the merged feature extractor. PR 5 is the current
   - Measure release binary size before and after if a model or dependency is embedded.
   - Confirm model/mode selection is explicit and default behavior remains unchanged.
 
-### [ ] PR 6: Training and Export Pipeline
+### [x] PR 6: Training and Export Pipeline
 
-- Suggested branch: `codex/issue-16-nnue-training`.
+- Suggested branch: `codex/issue-16-pr6-nnue-training`.
 - Purpose: create the tooling path from solved/search data to runtime weights.
 - Implementation:
-  - [ ] Add tooling to generate training examples.
-  - [ ] Define labels clearly: best move, child proof/disproof improvement, mate length, search-work reduction, or separate attacker/defender targets.
-  - [ ] Add export tooling for the runtime weight format.
-  - [ ] Keep generated large datasets and trained weights out of the repository unless explicitly approved.
+  - [x] Add tooling to generate training examples.
+  - [x] Define the initial label as the root move selected by the chosen evaluator; all other generated candidates receive label `0`.
+  - [x] Add export tooling for the versioned runtime weight format.
+  - [x] Keep generated large datasets and trained weights out of the repository unless explicitly approved.
 - Functional test:
   - Run the training/export command on a tiny local fixture.
   - Inspect generated examples and exported weights.
   - Load the exported fixture through the runtime path and confirm it produces usable output.
 - Self review:
-  - [ ] Add smoke or round-trip tests.
+  - [x] Add smoke or round-trip tests.
   - Confirm training dependencies are separate from solver runtime dependencies.
   - Confirm generated artifacts are either intentionally committed small fixtures or ignored/external.
 
