@@ -35,6 +35,11 @@ impl Default for NnueScorer {
                     feature: FeatureId(1),
                     weights: [-128, 128],
                 },
+                // FeatureId(30_001) is DROP_MOVE_KIND; the fixture favors drops.
+                FeatureWeight {
+                    feature: FeatureId(30_001),
+                    weights: [64, 32],
+                },
             ],
             output_weights: [2, 1],
             output_bias: 0,
@@ -85,6 +90,13 @@ mod tests {
         let scorer = NnueScorer::default();
 
         assert!(scorer.score(&[FeatureId(30_300)]) > scorer.score(&[]));
+    }
+
+    #[test]
+    fn fixture_inference_rewards_drop_feature() {
+        let scorer = NnueScorer::default();
+
+        assert!(scorer.score(&[FeatureId(30_001)]) > scorer.score(&[]));
     }
 
     #[test]
