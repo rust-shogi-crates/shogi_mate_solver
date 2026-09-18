@@ -157,26 +157,28 @@ fn generate_examples(args: &mut impl Iterator<Item = String>) -> Result<(), Stri
         if plies > 0 {
             let position = PartialPosition::from_usi(&format!("sfen {}", position.sfen))
                 .map_err(|error| format!("invalid SFEN for {id}: {error:?}"))?;
-            if let Some((sfen, chosen_move)) = replay_and_label(&position, plies) {
-                append_examples(
-                    &mut output,
-                    &id,
-                    &sfen,
-                    &chosen_move,
-                    &evaluator,
-                    "replay",
-                    plies,
-                )?;
-                if mirror {
+            for ply_offset in 1..=plies {
+                if let Some((sfen, chosen_move)) = replay_and_label(&position, ply_offset) {
                     append_examples(
                         &mut output,
                         &id,
-                        &mirror_sfen(&sfen)?,
-                        &mirror_move(&chosen_move)?,
+                        &sfen,
+                        &chosen_move,
                         &evaluator,
-                        "replay+mirror",
-                        plies,
+                        "replay",
+                        ply_offset,
                     )?;
+                    if mirror {
+                        append_examples(
+                            &mut output,
+                            &id,
+                            &mirror_sfen(&sfen)?,
+                            &mirror_move(&chosen_move)?,
+                            &evaluator,
+                            "replay+mirror",
+                            ply_offset,
+                        )?;
+                    }
                 }
             }
         }
