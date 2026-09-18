@@ -251,13 +251,19 @@ fn replay_and_label(position: &PartialPosition, plies: usize) -> Option<(String,
 
     let mut df_pn = DfPnTable::new(1 << 16);
     let mut eval = EvalTable::new(1 << 16);
-    let (_, best_move) = evalsearch::alpha_beta_me_with_options_and_stats(
+    // Augmentation labels use a bounded search so replay cannot turn example
+    // generation into an unbounded solver run. The root entry point must
+    // match the side to move: odd offsets are defender positions.
+    let search = if plies.is_multiple_of(2) {
+        evalsearch::alpha_beta_me_with_options_and_stats
+    } else {
+        evalsearch::alpha_beta_you_with_options_and_stats
+    };
+    let (_, best_move) = search(
         &wrapped,
         &mut df_pn,
         &mut eval,
         Value::ZERO,
-        // Augmentation labels use a bounded search so replay cannot turn
-        // example generation into an unbounded solver run.
         Value::new(6, 0, 0),
         &mut BTreeSet::new(),
         &mut Default::default(),
