@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs, process,
+    time::{Duration, Instant},
 };
 
 use mate_solver::{
@@ -44,6 +45,27 @@ struct TrainingExample {
     ply_offset: usize,
 }
 
+struct GenerationState {
+    deadline: Instant,
+    timed_out: bool,
+}
+
+impl GenerationState {
+    fn new(timeout_ms: u64) -> Self {
+        Self {
+            deadline: Instant::now() + Duration::from_millis(timeout_ms),
+            timed_out: false,
+        }
+    }
+
+    fn check_timeout(&mut self) -> bool {
+        if Instant::now() >= self.deadline {
+            self.timed_out = true;
+        }
+        self.timed_out
+    }
+}
+
 fn main() {
     if let Err(message) = run() {
         eprintln!("error: {message}");
@@ -67,7 +89,7 @@ fn run() -> Result<(), String> {
 fn print_usage() {
     eprintln!("usage:");
     eprintln!(
-        "  nnue_training examples --positions <positions.jsonl> --results <results.jsonl> --output <examples.jsonl> [--evaluator=eval] [--mirror] [--plies=<count>]"
+        "  nnue_training examples --positions <positions.jsonl> --results <results.jsonl> --output <examples.jsonl> [--evaluator=eval] [--mirror] [--plies=<count>] [--timeout-ms=<ms>]"
     );
     eprintln!(
         "  nnue_training export --examples <examples.jsonl> --output <model.nnue> [--limit=<count>]"
@@ -82,6 +104,7 @@ fn generate_examples(args: &mut impl Iterator<Item = String>) -> Result<(), Stri
     let mut evaluator = "eval".to_owned();
     let mut mirror = false;
     let mut plies = 0usize;
+    let mut timeout_ms = 60_000u64;
 
     while let Some(arg) = args.next() {
         if let Some(value) = arg.strip_prefix("--positions=") {
@@ -104,6 +127,10 @@ fn generate_examples(args: &mut impl Iterator<Item = String>) -> Result<(), Stri
             plies = value
                 .parse()
                 .map_err(|error| format!("invalid --plies: {error}"))?;
+        } else if let Some(value) = arg.strip_prefix("--timeout-ms=") {
+            timeout_ms = value
+                .parse()
+                .map_err(|error| format!("invalid --timeout-ms: {error}"))?;
         } else {
             return Err(format!("unknown argument: {arg}"));
         }
@@ -115,15 +142,27 @@ fn generate_examples(args: &mut impl Iterator<Item = String>) -> Result<(), Stri
     let positions = read_positions(&positions_path)?;
     let results = read_results(&results_path, &evaluator)?;
     let mut output = String::new();
+    let mut state = GenerationState::new(timeout_ms);
 
     for (line, position) in positions.into_iter().enumerate() {
+        if state.check_timeout() {
+            break;
+        }
         let id = position
             .id
             .unwrap_or_else(|| format!("{positions_path}:{}", line + 1));
         if !results.contains_key(&id) {
             continue;
         }
-        append_examples(&mut output, &id, &position.sfen, &evaluator, "identity", 0)?;
+        append_examples(
+            &mut output,
+            &id,
+            &position.sfen,
+            &evaluator,
+            "identity",
+            0,
+            &mut state,
+        )?;
         if mirror {
             append_examples(
                 &mut output,
@@ -132,14 +171,26 @@ fn generate_examples(args: &mut impl Iterator<Item = String>) -> Result<(), Stri
                 &evaluator,
                 "mirror",
                 0,
+                &mut state,
             )?;
         }
         if plies > 0 {
             let position = PartialPosition::from_usi(&format!("sfen {}", position.sfen))
                 .map_err(|error| format!("invalid SFEN for {id}: {error:?}"))?;
             for ply_offset in 1..=plies {
+                if state.check_timeout() {
+                    break;
+                }
                 if let Some((sfen, _chosen_move)) = replay_and_label(&position, ply_offset) {
-                    append_examples(&mut output, &id, &sfen, &evaluator, "replay", ply_offset)?;
+                    append_examples(
+                        &mut output,
+                        &id,
+                        &sfen,
+                        &evaluator,
+                        "replay",
+                        ply_offset,
+                        &mut state,
+                    )?;
                     if mirror {
                         append_examples(
                             &mut output,
@@ -148,6 +199,7 @@ fn generate_examples(args: &mut impl Iterator<Item = String>) -> Result<(), Stri
                             &evaluator,
                             "replay+mirror",
                             ply_offset,
+                            &mut state,
                         )?;
                     }
                 }
@@ -155,7 +207,11 @@ fn generate_examples(args: &mut impl Iterator<Item = String>) -> Result<(), Stri
         }
     }
 
-    fs::write(&output_path, output).map_err(|error| format!("write {output_path}: {error}"))
+    fs::write(&output_path, output).map_err(|error| format!("write {output_path}: {error}"))?;
+    if state.timed_out {
+        eprintln!("generation timed out after {timeout_ms} ms; wrote partial output");
+    }
+    Ok(())
 }
 
 fn append_examples(
@@ -165,6 +221,7 @@ fn append_examples(
     evaluator: &str,
     transform: &str,
     ply_offset: usize,
+    state: &mut GenerationState,
 ) -> Result<(), String> {
     let wrapped = PositionWrapper::new(
         PartialPosition::from_usi(&format!("sfen {sfen}"))
@@ -189,6 +246,9 @@ fn append_examples(
     let mut df_pn = DfPnTable::new(1 << 16);
     let mut eval = EvalTable::new(1 << 16);
     for mv in moves {
+        if state.check_timeout() {
+            break;
+        }
         let move_usi = mv.to_usi_owned();
         let label = u8::from(move_leads_to_mate(
             &wrapped, mv, role, evaluator, &mut df_pn, &mut eval,
@@ -243,15 +303,15 @@ fn move_leads_to_mate(
             Ok(result == (0, u32::MAX))
         }
         "eval" => {
-            // Match the benchmark evaluator's horizon so longer mates are
-            // not mislabeled as non-mates merely because of augmentation.
+            // Unproven positions are intentionally labeled non-mate. Keep
+            // this bounded so generation-level timeouts remain effective.
             let (value, _) = match role {
                 FeatureRole::Attacker => evalsearch::alpha_beta_you_with_options(
                     &child,
                     df_pn,
                     eval,
                     Value::ZERO,
-                    Value::new(40, 0, 0),
+                    Value::new(6, 0, 0),
                     &mut BTreeSet::new(),
                     &mut Default::default(),
                     false,
@@ -262,7 +322,7 @@ fn move_leads_to_mate(
                     df_pn,
                     eval,
                     Value::ZERO,
-                    Value::new(40, 0, 0),
+                    Value::new(6, 0, 0),
                     &mut BTreeSet::new(),
                     &mut Default::default(),
                     false,
@@ -546,6 +606,7 @@ mod tests {
     #[test]
     fn defender_examples_use_legal_moves() {
         let mut output = String::new();
+        let mut state = GenerationState::new(60_000);
         append_examples(
             &mut output,
             "source",
@@ -553,6 +614,7 @@ mod tests {
             "eval",
             "replay",
             1,
+            &mut state,
         )
         .unwrap();
         let examples: Vec<TrainingExample> = output
@@ -566,6 +628,7 @@ mod tests {
     #[test]
     fn labels_are_based_on_mate_outcome() {
         let mut output = String::new();
+        let mut state = GenerationState::new(60_000);
         append_examples(
             &mut output,
             "source",
@@ -573,6 +636,7 @@ mod tests {
             "df_pn",
             "identity",
             0,
+            &mut state,
         )
         .unwrap();
         let examples: Vec<TrainingExample> = output
