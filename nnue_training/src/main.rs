@@ -38,7 +38,6 @@ struct TrainingExample {
     #[serde(default)]
     source_id: String,
     sfen: String,
-    evaluator: String,
     role: String,
     move_usi: String,
     label: u8,
@@ -205,7 +204,6 @@ fn append_examples(
             id: id.clone(),
             source_id: source_id.to_owned(),
             sfen: sfen.to_owned(),
-            evaluator: evaluator.to_owned(),
             role: role_name.to_owned(),
             move_usi: move_usi.clone(),
             label,
