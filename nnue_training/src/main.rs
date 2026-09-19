@@ -18,6 +18,7 @@ use shogi_core::{Move, PartialPosition, ToUsi};
 use shogi_usi_parser::FromUsi;
 
 const HIDDEN_WEIGHT_SCALE: i32 = 64;
+const DFPN_LABEL_THRESHOLD: u32 = 1_024;
 
 #[derive(Deserialize)]
 struct PositionRecord {
@@ -292,7 +293,7 @@ fn move_leads_to_mate(
             let result = dfpnsearch::mid_with_options_and_stats(
                 df_pn,
                 &child,
-                (u32::MAX - 1, u32::MAX - 1),
+                (DFPN_LABEL_THRESHOLD, DFPN_LABEL_THRESHOLD),
                 node_kind,
                 true,
                 &mut Default::default(),
