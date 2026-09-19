@@ -35,20 +35,13 @@ struct SearchRecord {
 #[derive(Serialize, Deserialize)]
 struct TrainingExample {
     id: String,
-    #[serde(default)]
     source_id: String,
     sfen: String,
     role: String,
     move_usi: String,
     label: u8,
-    #[serde(default = "identity_transform")]
     transform: String,
-    #[serde(default)]
     ply_offset: usize,
-}
-
-fn identity_transform() -> String {
-    "identity".to_owned()
 }
 
 fn main() {
@@ -548,17 +541,6 @@ mod tests {
             mirror_sfen("3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1").unwrap(),
             "2sk1g3/2g6/4S4/1B7/9/9/9/9/9 b G2rbg2s4n4l18p 1"
         );
-    }
-
-    #[test]
-    fn legacy_examples_default_augmentation_metadata() {
-        let example: TrainingExample = serde_json::from_str(
-            r#"{"id":"old","sfen":"4k4/9/9/9/9/9/9/9/4K4 b - 1","evaluator":"eval","role":"attacker","move_usi":"G*5a","label":0}"#,
-        )
-        .unwrap();
-        assert_eq!(example.source_id, "");
-        assert_eq!(example.transform, "identity");
-        assert_eq!(example.ply_offset, 0);
     }
 
     #[test]
