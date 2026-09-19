@@ -4,6 +4,7 @@ use std::{
 };
 
 use mate_solver::{
+    df_pn::search as dfpnsearch,
     eval::{Value, search as evalsearch},
     features::{FeatureId, FeatureRole, candidate_features},
     move_ordering::MoveOrderingOptions,
@@ -29,7 +30,6 @@ struct SearchRecord {
     record_type: String,
     id: Option<String>,
     evaluator: Option<String>,
-    root_chosen_move: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -128,27 +128,15 @@ fn generate_examples(args: &mut impl Iterator<Item = String>) -> Result<(), Stri
         let id = position
             .id
             .unwrap_or_else(|| format!("{positions_path}:{}", line + 1));
-        let Some(source_chosen_move) = results
-            .get(&id)
-            .and_then(|record| record.root_chosen_move.as_ref())
-        else {
+        if !results.contains_key(&id) {
             continue;
-        };
-        append_examples(
-            &mut output,
-            &id,
-            &position.sfen,
-            source_chosen_move,
-            &evaluator,
-            "identity",
-            0,
-        )?;
+        }
+        append_examples(&mut output, &id, &position.sfen, &evaluator, "identity", 0)?;
         if mirror {
             append_examples(
                 &mut output,
                 &id,
                 &mirror_sfen(&position.sfen)?,
-                &mirror_move(source_chosen_move)?,
                 &evaluator,
                 "mirror",
                 0,
@@ -158,22 +146,13 @@ fn generate_examples(args: &mut impl Iterator<Item = String>) -> Result<(), Stri
             let position = PartialPosition::from_usi(&format!("sfen {}", position.sfen))
                 .map_err(|error| format!("invalid SFEN for {id}: {error:?}"))?;
             for ply_offset in 1..=plies {
-                if let Some((sfen, chosen_move)) = replay_and_label(&position, ply_offset) {
-                    append_examples(
-                        &mut output,
-                        &id,
-                        &sfen,
-                        &chosen_move,
-                        &evaluator,
-                        "replay",
-                        ply_offset,
-                    )?;
+                if let Some((sfen, _chosen_move)) = replay_and_label(&position, ply_offset) {
+                    append_examples(&mut output, &id, &sfen, &evaluator, "replay", ply_offset)?;
                     if mirror {
                         append_examples(
                             &mut output,
                             &id,
                             &mirror_sfen(&sfen)?,
-                            &mirror_move(&chosen_move)?,
                             &evaluator,
                             "replay+mirror",
                             ply_offset,
@@ -191,7 +170,6 @@ fn append_examples(
     output: &mut String,
     source_id: &str,
     sfen: &str,
-    chosen_move: &str,
     evaluator: &str,
     transform: &str,
     ply_offset: usize,
@@ -216,8 +194,13 @@ fn append_examples(
         FeatureRole::Defender => wrapped.all_evasions(),
         _ => return Err("unsupported feature role".to_owned()),
     };
+    let mut df_pn = DfPnTable::new(1 << 16);
+    let mut eval = EvalTable::new(1 << 16);
     for mv in moves {
         let move_usi = mv.to_usi_owned();
+        let label = u8::from(move_leads_to_mate(
+            &wrapped, mv, role, evaluator, &mut df_pn, &mut eval,
+        )?);
         let example = TrainingExample {
             id: id.clone(),
             source_id: source_id.to_owned(),
@@ -225,7 +208,7 @@ fn append_examples(
             evaluator: evaluator.to_owned(),
             role: role_name.to_owned(),
             move_usi: move_usi.clone(),
-            label: u8::from(move_usi == chosen_move),
+            label,
             transform: transform.to_owned(),
             ply_offset,
         };
@@ -236,6 +219,70 @@ fn append_examples(
         output.push('\n');
     }
     Ok(())
+}
+
+fn move_leads_to_mate(
+    position: &PositionWrapper,
+    mv: Move,
+    role: FeatureRole,
+    evaluator: &str,
+    df_pn: &mut DfPnTable,
+    eval: &mut EvalTable,
+) -> Result<bool, String> {
+    let mut child = position.clone();
+    child.make_move(mv);
+    match evaluator {
+        "df_pn" => {
+            let node_kind = match role {
+                FeatureRole::Attacker => dfpnsearch::NodeKind::And,
+                FeatureRole::Defender => dfpnsearch::NodeKind::Or,
+                _ => return Err("unsupported feature role".to_owned()),
+            };
+            let result = dfpnsearch::mid_with_options_and_stats(
+                df_pn,
+                &child,
+                (u32::MAX - 1, u32::MAX - 1),
+                node_kind,
+                true,
+                &mut Default::default(),
+                false,
+                &mut Default::default(),
+                &MoveOrderingOptions::default(),
+            );
+            Ok(result == (0, u32::MAX))
+        }
+        "eval" => {
+            // Match the benchmark evaluator's horizon so longer mates are
+            // not mislabeled as non-mates merely because of augmentation.
+            let (value, _) = match role {
+                FeatureRole::Attacker => evalsearch::alpha_beta_you_with_options(
+                    &child,
+                    df_pn,
+                    eval,
+                    Value::ZERO,
+                    Value::new(40, 0, 0),
+                    &mut BTreeSet::new(),
+                    &mut Default::default(),
+                    false,
+                    &MoveOrderingOptions::default(),
+                ),
+                FeatureRole::Defender => evalsearch::alpha_beta_me_with_options(
+                    &child,
+                    df_pn,
+                    eval,
+                    Value::ZERO,
+                    Value::new(40, 0, 0),
+                    &mut BTreeSet::new(),
+                    &mut Default::default(),
+                    false,
+                    &MoveOrderingOptions::default(),
+                ),
+                _ => return Err("unsupported feature role".to_owned()),
+            };
+            Ok(value.is_mate())
+        }
+        other => Err(format!("unsupported evaluator: {other}")),
+    }
 }
 
 fn replay_and_label(position: &PartialPosition, plies: usize) -> Option<(String, String)> {
@@ -323,45 +370,6 @@ fn mirror_rank(rank: &str) -> Result<String, String> {
         mirrored.push_str(&empty.to_string());
     }
     Ok(mirrored)
-}
-
-fn mirror_move(move_usi: &str) -> Result<String, String> {
-    if move_usi.len() < 4 {
-        return Err(format!("invalid USI move: {move_usi}"));
-    }
-    if move_usi.as_bytes().get(1) == Some(&b'*') {
-        return Ok(format!(
-            "{}*{}",
-            &move_usi[..1],
-            mirror_square(&move_usi[2..4])?
-        ));
-    }
-    let suffix = &move_usi[4..];
-    Ok(format!(
-        "{}{}{}{}{}",
-        mirror_file(&move_usi[0..1])?,
-        &move_usi[1..2],
-        mirror_file(&move_usi[2..3])?,
-        &move_usi[3..4],
-        suffix
-    ))
-}
-
-fn mirror_square(square: &str) -> Result<String, String> {
-    if square.len() != 2 {
-        return Err(format!("invalid USI square: {square}"));
-    }
-    Ok(format!("{}{}", mirror_file(&square[0..1])?, &square[1..2]))
-}
-
-fn mirror_file(file: &str) -> Result<String, String> {
-    let digit = file
-        .parse::<u8>()
-        .map_err(|error| format!("invalid USI file {file}: {error}"))?;
-    if !(1..=9).contains(&digit) {
-        return Err(format!("invalid USI file {file}"));
-    }
-    Ok(char::from(b'0' + 10 - digit).to_string())
 }
 
 fn export_model(args: &mut impl Iterator<Item = String>) -> Result<(), String> {
@@ -537,9 +545,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mirror_transforms_sfen_and_moves() {
-        assert_eq!(mirror_move("G*5a").unwrap(), "G*5a");
-        assert_eq!(mirror_move("2d4b+").unwrap(), "8d6b+");
+    fn mirror_transforms_sfen() {
         assert_eq!(
             mirror_sfen("3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1").unwrap(),
             "2sk1g3/2g6/4S4/1B7/9/9/9/9/9 b G2rbg2s4n4l18p 1"
@@ -564,7 +570,6 @@ mod tests {
             &mut output,
             "source",
             "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL w - 2",
-            "3g3f",
             "eval",
             "replay",
             1,
@@ -576,5 +581,25 @@ mod tests {
             .collect();
         assert!(!examples.is_empty());
         assert!(examples.iter().all(|example| example.role == "defender"));
+    }
+
+    #[test]
+    fn labels_are_based_on_mate_outcome() {
+        let mut output = String::new();
+        append_examples(
+            &mut output,
+            "source",
+            "3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1",
+            "df_pn",
+            "identity",
+            0,
+        )
+        .unwrap();
+        let examples: Vec<TrainingExample> = output
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert!(examples.iter().any(|example| example.label == 1));
+        assert!(examples.iter().any(|example| example.label == 0));
     }
 }
