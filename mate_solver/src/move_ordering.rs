@@ -16,7 +16,7 @@ pub struct FixtureScorer {
     entries: &'static [(FeatureId, i32)],
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MoveOrderingScorer {
     Fixture(FixtureScorer),
     Nnue(NnueScorer),
@@ -67,7 +67,7 @@ impl FeatureScorer for FixtureScorer {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct MoveOrderingOptions {
     pub mode: MoveOrderingMode,
     pub scorer: MoveOrderingScorer,
