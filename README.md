@@ -70,9 +70,9 @@ cargo run -p benchmark_harness -- compare --base benchmark-base.jsonl --current 
 
 ```
 cargo run --release -p benchmark_harness -- run --strict --move-ordering=nnue-fixture --revision=fixture benchmark/issue16-ordering.jsonl > /tmp/benchmark-results.jsonl
-cargo run --release -p nnue_training -- examples --positions benchmark/issue16-ordering.jsonl --results /tmp/benchmark-results.jsonl --output /tmp/nnue-examples.jsonl --evaluator=eval --mirror --plies=2
-cargo run --release -p nnue_training -- export --examples /tmp/nnue-examples.jsonl --output /tmp/nnue-model.nnue
-cargo run --release -p nnue_training -- score --model /tmp/nnue-model.nnue --examples /tmp/nnue-examples.jsonl
+cargo run --release -p nnue_training --bin generate -- --positions benchmark/issue16-ordering.jsonl --results /tmp/benchmark-results.jsonl --output /tmp/nnue-examples.jsonl --evaluator=eval --mirror --plies=2
+cargo run --release -p nnue_training --bin export -- --examples /tmp/nnue-examples.jsonl --output /tmp/nnue-model.nnue
+cargo run --release -p nnue_training --bin score -- --model /tmp/nnue-model.nnue --examples /tmp/nnue-examples.jsonl
 ```
 
 export された `NNUE-FIXTURE 1` テキストモデルは `mate_solver::nnue::NnueScorer::from_model` で読み込まれます。学習用の依存関係は独立した `nnue_training` crate に分離されており、solver のランタイム依存関係には含まれません。

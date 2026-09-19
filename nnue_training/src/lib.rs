@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env, fs, process,
+    fs,
     time::{Duration, Instant},
 };
 
@@ -67,38 +67,7 @@ impl GenerationState {
     }
 }
 
-fn main() {
-    if let Err(message) = run() {
-        eprintln!("error: {message}");
-        process::exit(1);
-    }
-}
-
-fn run() -> Result<(), String> {
-    let mut args = env::args().skip(1);
-    match args.next().as_deref() {
-        Some("examples") => generate_examples(&mut args),
-        Some("export") => export_model(&mut args),
-        Some("score") => score_examples(&mut args),
-        _ => {
-            print_usage();
-            Err("missing or unknown command".to_owned())
-        }
-    }
-}
-
-fn print_usage() {
-    eprintln!("usage:");
-    eprintln!(
-        "  nnue_training examples --positions <positions.jsonl> --results <results.jsonl> --output <examples.jsonl> [--evaluator=eval] [--mirror] [--plies=<count>] [--timeout-ms=<ms>]"
-    );
-    eprintln!(
-        "  nnue_training export --examples <examples.jsonl> --output <model.nnue> [--limit=<count>]"
-    );
-    eprintln!("  nnue_training score --model <model.nnue> --examples <examples.jsonl>");
-}
-
-fn generate_examples(args: &mut impl Iterator<Item = String>) -> Result<(), String> {
+pub fn generate_examples(args: &mut impl Iterator<Item = String>) -> Result<(), String> {
     let mut positions_path = None;
     let mut results_path = None;
     let mut output_path = None;
@@ -424,7 +393,7 @@ fn mirror_rank(rank: &str) -> Result<String, String> {
     Ok(mirrored)
 }
 
-fn export_model(args: &mut impl Iterator<Item = String>) -> Result<(), String> {
+pub fn export_model(args: &mut impl Iterator<Item = String>) -> Result<(), String> {
     let mut examples_path = None;
     let mut output_path = None;
     let mut limit = None;
@@ -506,7 +475,7 @@ fn export_model(args: &mut impl Iterator<Item = String>) -> Result<(), String> {
     fs::write(&output_path, model).map_err(|error| format!("write {output_path}: {error}"))
 }
 
-fn score_examples(args: &mut impl Iterator<Item = String>) -> Result<(), String> {
+pub fn score_examples(args: &mut impl Iterator<Item = String>) -> Result<(), String> {
     let mut model_path = None;
     let mut examples_path = None;
 

@@ -1,5 +1,7 @@
 use crate::features::FeatureId;
 
+mod parse;
+
 const HIDDEN_UNITS: usize = 2;
 const MAX_FEATURE_WEIGHTS: usize = 256;
 const EMPTY_FEATURE_WEIGHT: FeatureWeight = FeatureWeight {
@@ -64,29 +66,25 @@ impl NnueScorer {
         for line in lines {
             let mut fields = line.split_whitespace();
             match fields.next() {
-                Some("hidden_units") => expect_values(&mut fields, &["2"], "hidden_units")?,
+                Some("hidden_units") => parse::expect_values(&mut fields, &["2"], "hidden_units")?,
                 Some("hidden_bias") => {
-                    scorer.hidden_bias = parse_pair(&mut fields, "hidden_bias")?;
+                    scorer.hidden_bias = parse::parse_pair(&mut fields, "hidden_bias")?;
                 }
                 Some("output_weights") => {
-                    scorer.output_weights = parse_pair(&mut fields, "output_weights")?;
+                    scorer.output_weights = parse::parse_pair(&mut fields, "output_weights")?;
                 }
                 Some("output_bias") => {
-                    scorer.output_bias = parse_one(&mut fields, "output_bias")?;
+                    scorer.output_bias = parse::parse_one(&mut fields, "output_bias")?;
                 }
                 Some("output_shift") => {
-                    scorer.output_shift = parse_unsigned(&mut fields, "output_shift")?;
+                    scorer.output_shift = parse::parse_unsigned(&mut fields, "output_shift")?;
                 }
                 Some("feature") => {
                     if scorer.feature_count == MAX_FEATURE_WEIGHTS {
                         return Err("too many feature weights".to_owned());
                     }
-                    let feature = fields
-                        .next()
-                        .ok_or_else(|| "missing feature".to_owned())?
-                        .parse::<u32>()
-                        .map_err(|error| format!("invalid feature: {error}"))?;
-                    let weights = parse_pair(&mut fields, "feature weights")?;
+                    let feature = parse::parse_feature(&mut fields)?;
+                    let weights = parse::parse_pair(&mut fields, "feature weights")?;
                     scorer.add_feature(FeatureId(feature), weights);
                 }
                 Some(other) => return Err(format!("unknown model field: {other}")),
@@ -117,62 +115,6 @@ impl NnueScorer {
             + self.output_bias;
         output >> self.output_shift
     }
-}
-
-fn expect_values<'a>(
-    fields: &mut impl Iterator<Item = &'a str>,
-    expected: &[&str],
-    name: &str,
-) -> Result<(), String> {
-    let values = fields.collect::<Vec<_>>();
-    if values == expected {
-        Ok(())
-    } else {
-        Err(format!("invalid {name}"))
-    }
-}
-
-fn parse_one<'a>(fields: &mut impl Iterator<Item = &'a str>, name: &str) -> Result<i32, String> {
-    let value = fields
-        .next()
-        .ok_or_else(|| format!("missing {name}"))?
-        .parse()
-        .map_err(|error| format!("invalid {name}: {error}"))?;
-    if fields.next().is_some() {
-        return Err(format!("too many values for {name}"));
-    }
-    Ok(value)
-}
-
-fn parse_unsigned<'a>(
-    fields: &mut impl Iterator<Item = &'a str>,
-    name: &str,
-) -> Result<u32, String> {
-    let value = fields
-        .next()
-        .ok_or_else(|| format!("missing {name}"))?
-        .parse()
-        .map_err(|error| format!("invalid {name}: {error}"))?;
-    if fields.next().is_some() {
-        return Err(format!("too many values for {name}"));
-    }
-    Ok(value)
-}
-
-fn parse_pair<'a>(
-    fields: &mut impl Iterator<Item = &'a str>,
-    name: &str,
-) -> Result<[i32; HIDDEN_UNITS], String> {
-    let values = fields
-        .map(|value| {
-            value
-                .parse()
-                .map_err(|error| format!("invalid {name}: {error}"))
-        })
-        .collect::<Result<Vec<i32>, _>>()?;
-    values
-        .try_into()
-        .map_err(|_| format!("expected two values for {name}"))
 }
 
 #[cfg(test)]
