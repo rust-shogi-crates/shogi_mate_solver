@@ -36,4 +36,4 @@ cargo run --release -p nnue_training --bin score -- --model nnue_training/work/n
 
 `--mirror`はSFENと指し手を変換した左右対称の例を追加する。`--plies=N`は0手先からN手先まで各位置を生成し、各位置でevaluatorを再実行して新しいlabelを付け、元のID、変換方法、進めた手数を記録する。偶数のオフセットでは攻め方、奇数のオフセットでは玉方の候補手を生成する。候補手ごとの探索はデフォルトで60秒の生成期限を共有し、`--timeout-ms=<ms>`で変更できる。`--max-positions=<n>`を指定すると、各候補手の探索を検査した局面数でも打ち切れる。いずれかの期限に達した場合は完了済みの部分結果を書き出す。
 
-`score --output-file=<path>`は各学習例の`id`、局面、指し手、label、score、変換方法、ply offsetを指定したファイルへJSONLで出力する。未指定時は集計結果だけを標準出力に出す。
+`score --output-file=<path>`は各学習例の`id`、局面、指し手、label、raw score、sigmoid probability、変換方法、ply offsetを指定したファイルへJSONLで出力する。未指定時は集計結果だけを標準出力に出す。

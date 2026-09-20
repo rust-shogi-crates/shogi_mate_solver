@@ -30,6 +30,7 @@ struct ScoreRecord<'a> {
     move_usi: &'a str,
     label: u8,
     score: i32,
+    probability: u32,
     transform: &'a str,
     ply_offset: usize,
 }
@@ -89,11 +90,9 @@ fn run() -> Result<(), String> {
         };
         let mv = Move::from_usi(&example.move_usi)
             .map_err(|error| format!("invalid move for {}: {error:?}", example.id))?;
-        let score = scorer.score(&candidate_features(
-            &PositionWrapper::new(position),
-            mv,
-            role,
-        ));
+        let features = candidate_features(&PositionWrapper::new(position), mv, role);
+        let score = scorer.score(&features);
+        let probability = scorer.probability(&features);
         if output_file.is_some() {
             let record = ScoreRecord {
                 id: &example.id,
@@ -103,6 +102,7 @@ fn run() -> Result<(), String> {
                 move_usi: &example.move_usi,
                 label: example.label,
                 score,
+                probability,
                 transform: &example.transform,
                 ply_offset: example.ply_offset,
             };

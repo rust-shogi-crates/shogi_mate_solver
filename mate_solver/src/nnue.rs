@@ -4,6 +4,7 @@ pub mod parse;
 
 const HIDDEN_UNITS: usize = 2;
 const MAX_FEATURE_WEIGHTS: usize = 256;
+pub const PROBABILITY_SCALE: u32 = 1_000_000;
 const EMPTY_FEATURE_WEIGHT: FeatureWeight = FeatureWeight {
     feature: FeatureId(0),
     weights: [0; HIDDEN_UNITS],
@@ -88,6 +89,18 @@ impl NnueScorer {
             .sum::<i32>()
             + self.output_bias;
         output >> self.output_shift
+    }
+
+    /// Returns sigmoid(score) scaled to the integer range 0..=1_000_000.
+    pub fn probability(&self, features: &[FeatureId]) -> u32 {
+        let score = f64::from(self.score(features));
+        let probability = if score >= 0.0 {
+            1.0 / (1.0 + (-score).exp())
+        } else {
+            let exp = score.exp();
+            exp / (1.0 + exp)
+        };
+        (probability * f64::from(PROBABILITY_SCALE)).round() as u32
     }
 }
 
@@ -201,6 +214,15 @@ mod tests {
         let scorer = NnueScorer::default();
 
         assert_ne!(scorer.score(&[FeatureId(0)]), scorer.score(&[FeatureId(1)]));
+    }
+
+    #[test]
+    fn probability_is_monotonic_and_scaled() {
+        let scorer = NnueScorer::default();
+
+        assert_eq!(scorer.probability(&[]), 500_000);
+        assert!(scorer.probability(&[FeatureId(30_300)]) > scorer.probability(&[]));
+        assert!(scorer.probability(&[FeatureId(30_300)]) <= PROBABILITY_SCALE);
     }
 
     #[test]

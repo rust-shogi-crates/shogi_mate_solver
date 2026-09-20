@@ -66,9 +66,9 @@ output_bias 0
 `score --output-file=<path>`が書くファイル。入力した各学習例について1行出力する。
 
 ```json
-{"id":"mate5::identity::ply0","source_id":"mate5","sfen":"...","role":"attacker","move_usi":"5c4b+","label":1,"score":123,"transform":"identity","ply_offset":0}
+{"id":"mate5::identity::ply0","source_id":"mate5","sfen":"...","role":"attacker","move_usi":"5c4b+","label":1,"score":123,"probability":773000,"transform":"identity","ply_offset":0}
 ```
 
-入力学習例のフィールドに、モデルが計算した整数`score`を追加した形式になる。
+入力学習例のフィールドに、モデルが計算した整数`score`と`probability`を追加した形式になる。
 
-`score`は`NnueScorer::score`が返す符号付き32ビット整数で、確率や百分率ではない。モデルの重みと`output_shift`によって値の大きさが決まり、固定された正規化範囲はない。hidden層のReLU後に出力を右シフトするため、負のhidden値だけからなる候補は`0`になる。したがって`0`は有効なスコアであり、未評価やエラーを意味しない。
+`score`は`NnueScorer::score`が返すrawな符号付き32ビット整数で、確率ではない。モデルの重みと`output_shift`によって値の大きさが決まり、固定された正規化範囲はない。`probability`は`sigmoid(score) * 1_000_000`を丸めた値で、範囲は`0..=1_000_000`。学習時の目的関数に対応する確率的な指標だが、データ量やクラス重みの影響を受けるため、校正済みの確率ではない。hidden層のReLU後に出力を右シフトするため、負のhidden値だけからなる候補の`score`は`0`になる。`0`は有効なスコアであり、未評価やエラーを意味しない。

@@ -106,6 +106,8 @@ The remaining work starts from the merged NNUE runtime. PR 6 is the current impl
   - [ ] Add or reference a real trained model using the multi-layer format.
   - [x] Extend runtime inference from the two-unit fixture to `512 -> 32 -> 32 -> 1`.
   - [x] Extend model parsing and learning/export for the multi-layer format.
+  - [x] Expose the model's raw logit and a fixed-point sigmoid probability separately.
+  - [x] Emit the probability with per-example scores and document its calibration limits.
   - [x] Expose it through an explicit option first.
   - [ ] Document model provenance, training data, feature format version, and benchmark results.
   - [ ] Consider default enablement only after benchmark evidence supports it.
