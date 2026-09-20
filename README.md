@@ -4,11 +4,17 @@ mate_solver ==> 詰将棋を解く (SFEN 文字列を標準入力から 1 行で
 -  `--verbose` ==> 詳細な情報 (探索ノード数・実行時間など) を出力
 -  `--output=json` ==> 今風に JSON で出力
 -  `--move-format=traditional|official|kif|usi|csa` ==> 手の表示方法を変える
--  `--move-ordering=current|fixture|nnue-fixture` ==> 手の順序付け方式を選ぶ
+-  `--move-ordering=current|fixture|nnue-fixture|nnue-model` ==> 手の順序付け方式を選ぶ。`nnue-model` では `--nnue-model=<path>` でモデルを指定する
 
 実行例
 ```
 cargo run --bin mate_solver -- --verbose <<<"5kgnl/9/4+B1pp1/8p/9/9/9/9/9 b 2S2rb3g2s3n3l15p 1"
+```
+
+学習済みモデルを使う場合は、モデルをworktree内に置いて明示的に指定する。
+
+```sh
+cargo run --release -p shogi_mate_solver -- --move-ordering=nnue-model --nnue-model=nnue_training/work/nnue-model.nnue <<<"5kgnl/9/4+B1pp1/8p/9/9/9/9/9 b 2S2rb3g2s3n3l15p 1"
 ```
 
 # to_sfen
@@ -40,6 +46,9 @@ benchmark_harness は JSONL の局面リストを読み、df-pn と eval の結�
 cargo run --release -p benchmark_harness -- run --strict --revision=current benchmark/issue13-ci.jsonl
 cargo run --release -p benchmark_harness -- run --strict --revision=current benchmark/issue16-ordering.jsonl
 ```
+
+学習済みモデルの比較では、`--move-ordering=nnue-model` と
+`--nnue-model=<path>` を両方指定する。
 
 `run` の結果には、手の順序付けを評価するためのフィールドを含む:
 

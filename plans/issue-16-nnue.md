@@ -104,7 +104,7 @@ The remaining work starts from the merged NNUE runtime. PR 6 is the current impl
 - Purpose: connect a real trained model to the solver in an evidence-driven way.
 - Implementation:
   - [ ] Add or reference a real trained model.
-  - [ ] Expose it through an explicit option first.
+  - [x] Expose it through an explicit option first.
   - [ ] Document model provenance, training data, feature format version, and benchmark results.
   - [ ] Consider default enablement only after benchmark evidence supports it.
 - Functional test:

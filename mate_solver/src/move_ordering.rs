@@ -80,6 +80,7 @@ pub enum MoveOrderingMode {
     Current,
     FixtureScore,
     NnueFixture,
+    NnueModel,
 }
 
 pub fn order_df_pn_moves(
@@ -128,7 +129,9 @@ pub fn order_eval_moves_with_role(
                 1
             }
         }),
-        MoveOrderingMode::FixtureScore | MoveOrderingMode::NnueFixture => {
+        MoveOrderingMode::FixtureScore
+        | MoveOrderingMode::NnueFixture
+        | MoveOrderingMode::NnueModel => {
             let mut ordered: Vec<_> = moves
                 .iter()
                 .copied()

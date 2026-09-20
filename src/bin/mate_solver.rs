@@ -1,9 +1,10 @@
 use std::{
     collections::BTreeSet,
     env::args,
+    fs,
     io::Write,
     io::{BufRead, BufReader, stdin},
-    process::{Command, Stdio},
+    process::{self, Command, Stdio},
 };
 
 use mate_solver::df_pn::search as dfpnsearch;
@@ -40,7 +41,7 @@ struct Opts {
     move_ordering: MoveOrderingOptions,
 }
 
-fn parse_args() -> Opts {
+fn parse_args() -> Result<Opts, String> {
     let args: Vec<_> = args().collect();
     let mut opts = Opts {
         verbose: false,
@@ -49,24 +50,14 @@ fn parse_args() -> Opts {
         engine_path: None,
         move_ordering: MoveOrderingOptions::default(),
     };
+    let mut nnue_model_path = None;
+    let mut move_ordering_mode = "current".to_owned();
     for a in args {
         if a == "--verbose" {
             opts.verbose = true;
         }
         if let Some(rest) = a.strip_prefix("--move-ordering=") {
-            opts.move_ordering.mode = match rest {
-                "current" => MoveOrderingMode::Current,
-                "fixture" => {
-                    opts.move_ordering.scorer =
-                        MoveOrderingScorer::Fixture(FixtureScorer::default());
-                    MoveOrderingMode::FixtureScore
-                }
-                "nnue-fixture" => {
-                    opts.move_ordering.scorer = MoveOrderingScorer::Nnue(NnueScorer::default());
-                    MoveOrderingMode::NnueFixture
-                }
-                _ => panic!(),
-            };
+            move_ordering_mode = rest.to_owned();
         }
         if a == "--output=json" {
             opts.output = Output::Json;
@@ -84,8 +75,35 @@ fn parse_args() -> Opts {
         if let Some(rest) = a.strip_prefix("--engine-path=") {
             opts.engine_path = Some(rest.to_owned());
         }
+        if let Some(rest) = a.strip_prefix("--nnue-model=") {
+            nnue_model_path = Some(rest.to_owned());
+        }
     }
-    opts
+    opts.move_ordering = match move_ordering_mode.as_str() {
+        "current" => MoveOrderingOptions::default(),
+        "fixture" => MoveOrderingOptions {
+            mode: MoveOrderingMode::FixtureScore,
+            scorer: MoveOrderingScorer::Fixture(FixtureScorer::default()),
+        },
+        "nnue-fixture" => MoveOrderingOptions {
+            mode: MoveOrderingMode::NnueFixture,
+            scorer: MoveOrderingScorer::Nnue(NnueScorer::default()),
+        },
+        "nnue-model" => {
+            let path = nnue_model_path
+                .ok_or("--nnue-model is required with --move-ordering=nnue-model")?;
+            let text = fs::read_to_string(&path)
+                .map_err(|error| format!("read NNUE model {path}: {error}"))?;
+            let scorer = NnueScorer::from_model(&text)
+                .map_err(|error| format!("parse NNUE model {path}: {error}"))?;
+            MoveOrderingOptions {
+                mode: MoveOrderingMode::NnueModel,
+                scorer: MoveOrderingScorer::Nnue(scorer),
+            }
+        }
+        other => return Err(format!("unknown move ordering mode: {other}")),
+    };
+    Ok(opts)
 }
 
 fn invoke_external_engine(
@@ -223,7 +241,13 @@ fn solve_myself(position: &PartialPosition, opts: &Opts) -> Option<Vec<Move>> {
 
 // Take an SFEN string from stdin, and solves the problem.
 fn main() {
-    let opts = parse_args();
+    let opts = match parse_args() {
+        Ok(opts) => opts,
+        Err(message) => {
+            eprintln!("error: {message}");
+            process::exit(2);
+        }
+    };
     let mut sfen = String::new();
     stdin().read_line(&mut sfen).unwrap();
     if opts.verbose {

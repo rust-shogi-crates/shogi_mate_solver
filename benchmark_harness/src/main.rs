@@ -160,7 +160,7 @@ fn run() -> Result<(), ()> {
 fn print_usage() {
     eprintln!("usage:");
     eprintln!(
-        "  benchmark_harness run [--strict] [--verbose] [--move-ordering=<mode>] [--revision=<label>] <positions.jsonl>..."
+        "  benchmark_harness run [--strict] [--verbose] [--move-ordering=current|fixture|nnue-fixture|nnue-model] [--nnue-model=<path>] [--revision=<label>] <positions.jsonl>..."
     );
     eprintln!(
         "  benchmark_harness compare --base <base.jsonl> --current <current.jsonl> [--html <report.html>]"
@@ -171,7 +171,8 @@ fn run_benchmark(args: &[String]) -> Result<(), ()> {
     let mut revision = "current".to_owned();
     let mut strict = false;
     let mut verbose = false;
-    let mut move_ordering = MoveOrderingOptions::default();
+    let mut move_ordering_mode = "current".to_owned();
+    let mut nnue_model_path = None;
     let mut inputs = Vec::new();
 
     for arg in args {
@@ -180,21 +181,9 @@ fn run_benchmark(args: &[String]) -> Result<(), ()> {
         } else if arg == "--verbose" {
             verbose = true;
         } else if let Some(mode) = arg.strip_prefix("--move-ordering=") {
-            move_ordering = match mode {
-                "current" => MoveOrderingOptions::default(),
-                "fixture" => MoveOrderingOptions {
-                    mode: MoveOrderingMode::FixtureScore,
-                    scorer: MoveOrderingScorer::Fixture(FixtureScorer::default()),
-                },
-                "nnue-fixture" => MoveOrderingOptions {
-                    mode: MoveOrderingMode::NnueFixture,
-                    scorer: MoveOrderingScorer::Nnue(NnueScorer::default()),
-                },
-                _ => {
-                    eprintln!("unknown move ordering mode: {mode}");
-                    return Err(());
-                }
-            };
+            move_ordering_mode = mode.to_owned();
+        } else if let Some(path) = arg.strip_prefix("--nnue-model=") {
+            nnue_model_path = Some(path.to_owned());
         } else if let Some(rest) = arg.strip_prefix("--revision=") {
             revision = rest.to_owned();
         } else {
@@ -206,6 +195,49 @@ fn run_benchmark(args: &[String]) -> Result<(), ()> {
         print_usage();
         return Err(());
     }
+
+    let move_ordering = match move_ordering_mode.as_str() {
+        "current" => MoveOrderingOptions::default(),
+        "fixture" => MoveOrderingOptions {
+            mode: MoveOrderingMode::FixtureScore,
+            scorer: MoveOrderingScorer::Fixture(FixtureScorer::default()),
+        },
+        "nnue-fixture" => MoveOrderingOptions {
+            mode: MoveOrderingMode::NnueFixture,
+            scorer: MoveOrderingScorer::Nnue(NnueScorer::default()),
+        },
+        "nnue-model" => {
+            let path = match nnue_model_path {
+                Some(path) => path,
+                None => {
+                    eprintln!("--nnue-model is required with --move-ordering=nnue-model");
+                    return Err(());
+                }
+            };
+            let text = match fs::read_to_string(&path) {
+                Ok(text) => text,
+                Err(error) => {
+                    eprintln!("read NNUE model {path}: {error}");
+                    return Err(());
+                }
+            };
+            let scorer = match NnueScorer::from_model(&text) {
+                Ok(scorer) => scorer,
+                Err(error) => {
+                    eprintln!("parse NNUE model {path}: {error}");
+                    return Err(());
+                }
+            };
+            MoveOrderingOptions {
+                mode: MoveOrderingMode::NnueModel,
+                scorer: MoveOrderingScorer::Nnue(scorer),
+            }
+        }
+        mode => {
+            eprintln!("unknown move ordering mode: {mode}");
+            return Err(());
+        }
+    };
 
     println!(
         "{}",
