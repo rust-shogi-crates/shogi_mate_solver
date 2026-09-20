@@ -130,6 +130,8 @@ fn run() -> Result<(), String> {
         if !results.contains_key(&id) {
             continue;
         }
+        let mut df_pn = DfPnTable::new(1 << 16);
+        let mut eval = EvalTable::new(1 << 16);
         append_examples(
             &mut output,
             &id,
@@ -138,6 +140,8 @@ fn run() -> Result<(), String> {
             "identity",
             0,
             &mut state,
+            &mut df_pn,
+            &mut eval,
         )?;
         if mirror {
             append_examples(
@@ -148,6 +152,8 @@ fn run() -> Result<(), String> {
                 "mirror",
                 0,
                 &mut state,
+                &mut df_pn,
+                &mut eval,
             )?;
         }
         if plies > 0 {
@@ -158,7 +164,7 @@ fn run() -> Result<(), String> {
                     break;
                 }
                 if let Some((sfen, _chosen_move)) =
-                    replay_and_label(&position, ply_offset, &mut state)
+                    replay_and_label(&position, ply_offset, &mut state, &mut df_pn, &mut eval)
                 {
                     append_examples(
                         &mut output,
@@ -168,6 +174,8 @@ fn run() -> Result<(), String> {
                         "replay",
                         ply_offset,
                         &mut state,
+                        &mut df_pn,
+                        &mut eval,
                     )?;
                     if mirror {
                         append_examples(
@@ -178,6 +186,8 @@ fn run() -> Result<(), String> {
                             "replay+mirror",
                             ply_offset,
                             &mut state,
+                            &mut df_pn,
+                            &mut eval,
                         )?;
                     }
                 }
@@ -192,6 +202,7 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn append_examples(
     output: &mut String,
     source_id: &str,
@@ -200,6 +211,8 @@ fn append_examples(
     transform: &str,
     ply_offset: usize,
     state: &mut GenerationState,
+    df_pn: &mut DfPnTable,
+    eval: &mut EvalTable,
 ) -> Result<(), String> {
     let wrapped = PositionWrapper::new(
         PartialPosition::from_usi(&format!("sfen {sfen}"))
@@ -221,16 +234,12 @@ fn append_examples(
         FeatureRole::Defender => wrapped.all_evasions(),
         _ => return Err("unsupported feature role".to_owned()),
     };
-    let mut df_pn = DfPnTable::new(1 << 16);
-    let mut eval = EvalTable::new(1 << 16);
     for mv in moves {
         if state.check_timeout() {
             break;
         }
         let move_usi = mv.to_usi_owned();
-        let label = match move_leads_to_mate(
-            &wrapped, mv, role, evaluator, &mut df_pn, &mut eval, state,
-        )? {
+        let label = match move_leads_to_mate(&wrapped, mv, role, evaluator, df_pn, eval, state)? {
             Some(label) => u8::from(label),
             None => break,
         };
@@ -346,6 +355,8 @@ fn replay_and_label(
     position: &PartialPosition,
     plies: usize,
     state: &mut GenerationState,
+    df_pn: &mut DfPnTable,
+    eval: &mut EvalTable,
 ) -> Option<(String, String)> {
     let mut wrapped = PositionWrapper::new(position.clone());
     for ply in 0..plies {
@@ -357,8 +368,6 @@ fn replay_and_label(
         wrapped.make_move(mv);
     }
 
-    let mut df_pn = DfPnTable::new(1 << 16);
-    let mut eval = EvalTable::new(1 << 16);
     let mut eval_stats = evalsearch::SearchStats::with_deadline(state.deadline);
     let mut dfpn_stats = dfpnsearch::SearchStats::with_deadline(state.deadline);
     // Augmentation labels use a bounded search so replay cannot turn example
@@ -371,8 +380,8 @@ fn replay_and_label(
     };
     let (_, best_move) = search(
         &wrapped,
-        &mut df_pn,
-        &mut eval,
+        df_pn,
+        eval,
         Value::ZERO,
         Value::new(6, 0, 0),
         &mut BTreeSet::new(),
@@ -488,6 +497,8 @@ mod tests {
     fn defender_examples_use_legal_moves() {
         let mut output = String::new();
         let mut state = GenerationState::new(60_000);
+        let mut df_pn = DfPnTable::new(1 << 16);
+        let mut eval = EvalTable::new(1 << 16);
         append_examples(
             &mut output,
             "source",
@@ -496,6 +507,8 @@ mod tests {
             "replay",
             1,
             &mut state,
+            &mut df_pn,
+            &mut eval,
         )
         .unwrap();
         let examples: Vec<TrainingExample> = output
@@ -510,6 +523,8 @@ mod tests {
     fn labels_are_based_on_mate_outcome() {
         let mut output = String::new();
         let mut state = GenerationState::new(60_000);
+        let mut df_pn = DfPnTable::new(1 << 16);
+        let mut eval = EvalTable::new(1 << 16);
         append_examples(
             &mut output,
             "source",
@@ -518,6 +533,8 @@ mod tests {
             "identity",
             0,
             &mut state,
+            &mut df_pn,
+            &mut eval,
         )
         .unwrap();
         let examples: Vec<TrainingExample> = output
