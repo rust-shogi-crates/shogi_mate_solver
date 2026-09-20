@@ -1,14 +1,13 @@
 // 長井, 今井: df-pnアルゴリズムの詰将棋を解くプログラムへの応用.
 
-use shogi_core::{Move, Square};
-use std::time::Instant;
-
 use crate::{
     features::FeatureRole,
     move_ordering::{order_df_pn_moves, MoveOrderingOptions},
     position_wrapper::{Key, PositionWrapper},
     tt::DfPnTable,
+    SearchConfig,
 };
+use shogi_core::{Move, Square};
 
 #[derive(Clone, Copy)]
 pub enum NodeKind {
@@ -30,28 +29,32 @@ impl NodeKind {
 #[derive(Clone, Default)]
 pub struct SearchCtx {
     seq: Vec<Move>,
+    config: SearchConfig,
+}
+
+impl SearchCtx {
+    pub fn with_config(config: SearchConfig) -> Self {
+        Self {
+            seq: vec![],
+            config,
+        }
+    }
+
+    pub fn config(&self) -> SearchConfig {
+        self.config
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
+/// Search counters and terminal status. Search limits belong to `SearchConfig`.
 pub struct SearchStats {
     pub positions_inspected: u64,
-    pub deadline: Option<Instant>,
     pub timed_out: bool,
 }
 
 impl SearchStats {
-    pub fn with_deadline(deadline: Instant) -> Self {
-        Self {
-            deadline: Some(deadline),
-            ..Self::default()
-        }
-    }
-
-    fn check_deadline(&mut self) -> bool {
-        if self
-            .deadline
-            .is_some_and(|deadline| Instant::now() >= deadline)
-        {
+    fn check_deadline(&mut self, config: SearchConfig) -> bool {
+        if config.deadline_expired() {
             self.timed_out = true;
         }
         self.timed_out
@@ -214,7 +217,7 @@ pub fn mid_with_options_and_stats(
     stats: &mut SearchStats,
     move_ordering: &MoveOrderingOptions,
 ) -> (u32, u32) {
-    if stats.check_deadline() {
+    if stats.check_deadline(ctx.config()) {
         return (u32::MAX - 1, u32::MAX - 1);
     }
     stats.positions_inspected += 1;
@@ -273,7 +276,7 @@ pub fn mid_with_options_and_stats(
 
     // 4. 多重反復深化
     loop {
-        if stats.check_deadline() {
+        if stats.check_deadline(ctx.config()) {
             return (u32::MAX - 1, u32::MAX - 1);
         }
         let phi_sum = phi_sum(dfpn_tbl, &children);
@@ -476,7 +479,8 @@ mod tests {
                 .unwrap();
         let wrapped = PositionWrapper::new(position);
         let mut table = DfPnTable::new(1 << 12);
-        let mut stats = SearchStats::with_deadline(Instant::now() - Duration::from_secs(1));
+        let config = crate::SearchConfig::with_deadline(Instant::now() - Duration::from_secs(1));
+        let mut stats = SearchStats::default();
 
         let result = mid_with_options_and_stats(
             &mut table,
@@ -484,7 +488,7 @@ mod tests {
             (10, 10),
             NodeKind::Or,
             true,
-            &mut SearchCtx::default(),
+            &mut SearchCtx::with_config(config),
             false,
             &mut stats,
             &MoveOrderingOptions::default(),

@@ -5,6 +5,7 @@ use std::{
 };
 
 use mate_solver::{
+    SearchConfig,
     df_pn::search as dfpnsearch,
     eval::{Value, search as evalsearch},
     features::FeatureRole,
@@ -287,14 +288,15 @@ fn move_leads_to_mate(
                 FeatureRole::Defender => dfpnsearch::NodeKind::Or,
                 _ => return Err("unsupported feature role".to_owned()),
             };
-            let mut stats = dfpnsearch::SearchStats::with_deadline(state.deadline);
+            let config = SearchConfig::with_deadline(state.deadline);
+            let mut stats = dfpnsearch::SearchStats::default();
             let result = dfpnsearch::mid_with_options_and_stats(
                 df_pn,
                 &child,
                 (DFPN_LABEL_THRESHOLD, DFPN_LABEL_THRESHOLD),
                 node_kind,
                 true,
-                &mut Default::default(),
+                &mut dfpnsearch::SearchCtx::with_config(config),
                 false,
                 &mut stats,
                 &MoveOrderingOptions::default(),
@@ -309,8 +311,9 @@ fn move_leads_to_mate(
         "eval" => {
             // Unproven positions are intentionally labeled non-mate. Keep
             // this bounded so generation-level timeouts remain effective.
-            let mut eval_stats = evalsearch::SearchStats::with_deadline(state.deadline);
-            let mut dfpn_stats = dfpnsearch::SearchStats::with_deadline(state.deadline);
+            let config = SearchConfig::with_deadline(state.deadline);
+            let mut eval_stats = evalsearch::SearchStats::default();
+            let mut dfpn_stats = dfpnsearch::SearchStats::default();
             let (value, _) = match role {
                 FeatureRole::Attacker => evalsearch::alpha_beta_you_with_options_and_stats(
                     &child,
@@ -319,7 +322,7 @@ fn move_leads_to_mate(
                     Value::ZERO,
                     Value::new(6, 0, 0),
                     &mut BTreeSet::new(),
-                    &mut Default::default(),
+                    &mut evalsearch::SearchCtx::with_config(config),
                     false,
                     &mut eval_stats,
                     &mut dfpn_stats,
@@ -332,7 +335,7 @@ fn move_leads_to_mate(
                     Value::ZERO,
                     Value::new(6, 0, 0),
                     &mut BTreeSet::new(),
-                    &mut Default::default(),
+                    &mut evalsearch::SearchCtx::with_config(config),
                     false,
                     &mut eval_stats,
                     &mut dfpn_stats,
@@ -368,8 +371,9 @@ fn replay_and_label(
         wrapped.make_move(mv);
     }
 
-    let mut eval_stats = evalsearch::SearchStats::with_deadline(state.deadline);
-    let mut dfpn_stats = dfpnsearch::SearchStats::with_deadline(state.deadline);
+    let config = SearchConfig::with_deadline(state.deadline);
+    let mut eval_stats = evalsearch::SearchStats::default();
+    let mut dfpn_stats = dfpnsearch::SearchStats::default();
     // Augmentation labels use a bounded search so replay cannot turn example
     // generation into an unbounded solver run. The root entry point must
     // match the side to move: odd offsets are defender positions.
@@ -385,7 +389,7 @@ fn replay_and_label(
         Value::ZERO,
         Value::new(6, 0, 0),
         &mut BTreeSet::new(),
-        &mut Default::default(),
+        &mut evalsearch::SearchCtx::with_config(config),
         false,
         &mut eval_stats,
         &mut dfpn_stats,

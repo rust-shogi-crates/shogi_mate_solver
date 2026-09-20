@@ -1,4 +1,7 @@
-use std::collections::{BTreeSet, HashMap};
+use std::{
+    collections::{BTreeSet, HashMap},
+    time::Instant,
+};
 
 use df_pn::search as dfpnsearch;
 use eval::{search as evalsearch, Value};
@@ -13,6 +16,39 @@ pub mod move_ordering;
 pub mod nnue;
 pub mod position_wrapper;
 pub mod tt;
+
+/// Optional limits and other controls for a search invocation.
+///
+/// On `wasm32`, a deadline is intentionally ignored because the standard
+/// library cannot provide a reliable monotonic clock on every WASM host.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SearchConfig {
+    deadline: Option<Instant>,
+}
+
+impl SearchConfig {
+    pub fn with_deadline(deadline: Instant) -> Self {
+        Self {
+            deadline: Some(deadline),
+        }
+    }
+
+    pub(crate) fn deadline_expired(self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            // `std::time::Instant::now()` is not available on all WASM hosts.
+            // Ignore an optional native deadline instead of producing a panic
+            // or a false timeout and returning a bogus search result.
+            let _ = self.deadline;
+            false
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Answer {
