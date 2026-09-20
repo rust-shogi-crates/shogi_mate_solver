@@ -60,7 +60,7 @@ feature 30300 64 32
 
 ## NNUE-FIXTURE 2 model
 
-`NNUE-FIXTURE 2`は、入力512ユニット、hidden 32ユニット、hidden 32ユニット、出力1ユニットの固定構成を使う。`input_weights`はFeature IDごとの512個の入力重みで、同じFeature IDは1回だけ指定する。
+`NNUE-FIXTURE 2`は、入力512ユニット、hidden 32ユニット、hidden 32ユニット、出力1ユニットの固定構成を使う。`input_weights`はFeature IDごとの512個の入力重みで、同じFeature IDは1回だけ指定する。`learn`はこの全結合層を逆伝播で更新する。
 
 ```text
 NNUE-FIXTURE 2

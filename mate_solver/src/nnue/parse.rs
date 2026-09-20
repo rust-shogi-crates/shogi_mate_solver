@@ -152,9 +152,9 @@ impl DeepModel {
         Self {
             input_weights: BTreeMap::new(),
             layer1_weights,
-            layer1_bias: vec![0; DEEP_HIDDEN_1],
+            layer1_bias: vec![1; DEEP_HIDDEN_1],
             layer2_weights,
-            layer2_bias: vec![0; DEEP_HIDDEN_2],
+            layer2_bias: vec![1; DEEP_HIDDEN_2],
             output_weights: vec![1; DEEP_HIDDEN_2],
             output_bias: 0,
             output_shift: 0,

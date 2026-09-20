@@ -31,7 +31,7 @@ cargo run --release -p nnue_training --bin score -- --model nnue_training/work/n
 
 `learn`の入力モデルは、学習開始時点の重みを指定する。`init`は学習開始用の空の仮置きモデルを作る。現在の`init`は`512 -> 32 -> 32 -> 1`の`NNUE-FIXTURE 2`モデルを作り、`learn`は同じ形式で保存する。solverは`mate_solver::nnue::NnueScorer::from_model`でこの形式を読み込む。`NNUE-FIXTURE 1`も既存モデルの読み込み用に残している。学習用の依存関係は独立した`nnue_training` crateに分離してあり、solverのランタイム依存関係には含まれない。
 
-<!-- FIXME: learnが本格的な訓練器になったら、現在の簡易的な重み更新の説明を追加する。 -->
+`learn`のv2学習は、ラベル付き例を10 epoch決定的な順序で処理するオンラインSGD。出力にsigmoidを置いたweighted binary cross-entropyの勾配を、ReLUを挟む全ての層（入力重み、2つのhidden層、出力層）へ逆伝播し、最後に固定小数点の整数重みへ丸める。正例が少ないデータでも勾配が消えないよう、正例には固定のクラス重みを掛ける。v1入力は従来の互換用更新を使う。
 
 `--mirror`はSFENと指し手を変換した左右対称の例を追加する。`--plies=N`は0手先からN手先まで各位置を生成し、各位置でevaluatorを再実行して新しいlabelを付け、元のID、変換方法、進めた手数を記録する。偶数のオフセットでは攻め方、奇数のオフセットでは玉方の候補手を生成する。候補手ごとの探索はデフォルトで60秒の生成期限を共有し、`--timeout-ms=<ms>`で変更できる。`--max-positions=<n>`を指定すると、各候補手の探索を検査した局面数でも打ち切れる。いずれかの期限に達した場合は完了済みの部分結果を書き出す。
 

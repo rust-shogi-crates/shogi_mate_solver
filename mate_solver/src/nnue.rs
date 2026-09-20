@@ -112,11 +112,6 @@ fn score_deep(model: &parse::DeepModel, features: &[FeatureId]) -> i32 {
             }
         }
     }
-    let input = input
-        .into_iter()
-        .map(|value| value.max(0))
-        .collect::<Vec<_>>();
-
     let hidden1 = dense_relu(
         &input,
         &model.layer1_weights,
