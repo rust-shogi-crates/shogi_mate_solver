@@ -47,22 +47,33 @@ struct TrainingExample {
 
 struct GenerationState {
     deadline: Instant,
-    timed_out: bool,
+    max_positions: Option<u64>,
+    limit_reached: bool,
 }
 
 impl GenerationState {
-    fn new(timeout_ms: u64) -> Self {
+    fn new(timeout_ms: u64, max_positions: Option<u64>) -> Self {
         Self {
             deadline: Instant::now() + Duration::from_millis(timeout_ms),
-            timed_out: false,
+            max_positions,
+            limit_reached: false,
+        }
+    }
+
+    fn search_config(&self) -> SearchConfig {
+        match self.max_positions {
+            Some(max_positions) => {
+                SearchConfig::with_deadline_and_max_positions(self.deadline, max_positions)
+            }
+            None => SearchConfig::with_deadline(self.deadline),
         }
     }
 
     fn check_timeout(&mut self) -> bool {
         if Instant::now() >= self.deadline {
-            self.timed_out = true;
+            self.limit_reached = true;
         }
-        self.timed_out
+        self.limit_reached
     }
 }
 
@@ -82,6 +93,7 @@ fn run() -> Result<(), String> {
     let mut mirror = false;
     let mut plies = 0usize;
     let mut timeout_ms = 60_000u64;
+    let mut max_positions = None;
 
     while let Some(arg) = args.next() {
         if let Some(value) = arg.strip_prefix("--positions=") {
@@ -108,6 +120,12 @@ fn run() -> Result<(), String> {
             timeout_ms = value
                 .parse()
                 .map_err(|error| format!("invalid --timeout-ms: {error}"))?;
+        } else if let Some(value) = arg.strip_prefix("--max-positions=") {
+            max_positions = Some(
+                value
+                    .parse()
+                    .map_err(|error| format!("invalid --max-positions: {error}"))?,
+            );
         } else {
             return Err(format!("unknown argument: {arg}"));
         }
@@ -119,7 +137,7 @@ fn run() -> Result<(), String> {
     let positions = read_positions(&positions_path)?;
     let results = read_results(&results_path, &evaluator)?;
     let mut output = String::new();
-    let mut state = GenerationState::new(timeout_ms);
+    let mut state = GenerationState::new(timeout_ms, max_positions);
 
     for (line, position) in positions.into_iter().enumerate() {
         if state.check_timeout() {
@@ -197,8 +215,8 @@ fn run() -> Result<(), String> {
     }
 
     fs::write(&output_path, output).map_err(|error| format!("write {output_path}: {error}"))?;
-    if state.timed_out {
-        eprintln!("generation timed out after {timeout_ms} ms; wrote partial output");
+    if state.limit_reached {
+        eprintln!("generation limit reached; wrote partial output");
     }
     Ok(())
 }
@@ -273,7 +291,7 @@ fn move_leads_to_mate(
     state: &mut GenerationState,
 ) -> Result<Option<bool>, String> {
     if state.check_timeout() {
-        state.timed_out = true;
+        state.limit_reached = true;
         return Ok(None);
     }
     let mut child = position.clone();
@@ -288,7 +306,7 @@ fn move_leads_to_mate(
                 FeatureRole::Defender => dfpnsearch::NodeKind::Or,
                 _ => return Err("unsupported feature role".to_owned()),
             };
-            let config = SearchConfig::with_deadline(state.deadline);
+            let config = state.search_config();
             let mut stats = dfpnsearch::SearchStats::default();
             let result = dfpnsearch::mid_with_options_and_stats(
                 df_pn,
@@ -301,8 +319,8 @@ fn move_leads_to_mate(
                 &mut stats,
                 &MoveOrderingOptions::default(),
             );
-            if stats.timed_out || state.check_timeout() {
-                state.timed_out = true;
+            if stats.limit_reached || state.check_timeout() {
+                state.limit_reached = true;
                 Ok(None)
             } else {
                 Ok(Some(result == (0, u32::MAX)))
@@ -311,7 +329,7 @@ fn move_leads_to_mate(
         "eval" => {
             // Unproven positions are intentionally labeled non-mate. Keep
             // this bounded so generation-level timeouts remain effective.
-            let config = SearchConfig::with_deadline(state.deadline);
+            let config = state.search_config();
             let mut eval_stats = evalsearch::SearchStats::default();
             let mut dfpn_stats = dfpnsearch::SearchStats::default();
             let (value, _) = match role {
@@ -343,8 +361,8 @@ fn move_leads_to_mate(
                 ),
                 _ => return Err("unsupported feature role".to_owned()),
             };
-            if eval_stats.timed_out || dfpn_stats.timed_out || state.check_timeout() {
-                state.timed_out = true;
+            if eval_stats.limit_reached || dfpn_stats.limit_reached || state.check_timeout() {
+                state.limit_reached = true;
                 Ok(None)
             } else {
                 Ok(Some(value.is_mate()))
@@ -371,7 +389,7 @@ fn replay_and_label(
         wrapped.make_move(mv);
     }
 
-    let config = SearchConfig::with_deadline(state.deadline);
+    let config = state.search_config();
     let mut eval_stats = evalsearch::SearchStats::default();
     let mut dfpn_stats = dfpnsearch::SearchStats::default();
     // Augmentation labels use a bounded search so replay cannot turn example
@@ -395,8 +413,8 @@ fn replay_and_label(
         &mut dfpn_stats,
         &MoveOrderingOptions::default(),
     );
-    if eval_stats.timed_out || dfpn_stats.timed_out || state.check_timeout() {
-        state.timed_out = true;
+    if eval_stats.limit_reached || dfpn_stats.limit_reached || state.check_timeout() {
+        state.limit_reached = true;
         return None;
     }
     Some((wrapped.inner().to_sfen_owned(), best_move?.to_usi_owned()))
@@ -500,7 +518,7 @@ mod tests {
     #[test]
     fn defender_examples_use_legal_moves() {
         let mut output = String::new();
-        let mut state = GenerationState::new(60_000);
+        let mut state = GenerationState::new(60_000, None);
         let mut df_pn = DfPnTable::new(1 << 16);
         let mut eval = EvalTable::new(1 << 16);
         append_examples(
@@ -526,7 +544,7 @@ mod tests {
     #[test]
     fn labels_are_based_on_mate_outcome() {
         let mut output = String::new();
-        let mut state = GenerationState::new(60_000);
+        let mut state = GenerationState::new(60_000, None);
         let mut df_pn = DfPnTable::new(1 << 16);
         let mut eval = EvalTable::new(1 << 16);
         append_examples(
@@ -563,7 +581,7 @@ mod tests {
                     found_immediate_mate = true;
                     let mut df_pn = DfPnTable::new(1 << 16);
                     let mut eval = EvalTable::new(1 << 16);
-                    let mut state = GenerationState::new(60_000);
+                    let mut state = GenerationState::new(60_000, None);
                     assert_eq!(
                         move_leads_to_mate(
                             &wrapped,

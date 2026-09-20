@@ -49,15 +49,15 @@ impl SearchCtx {
 /// Search counters and terminal status. Search limits belong to `SearchConfig`.
 pub struct SearchStats {
     pub positions_inspected: u64,
-    pub timed_out: bool,
+    pub limit_reached: bool,
 }
 
 impl SearchStats {
-    fn check_deadline(&mut self, config: SearchConfig) -> bool {
-        if config.deadline_expired() {
-            self.timed_out = true;
+    fn check_limits(&mut self, config: SearchConfig) -> bool {
+        if config.limit_reached(self.positions_inspected) {
+            self.limit_reached = true;
         }
-        self.timed_out
+        self.limit_reached
     }
 }
 
@@ -217,7 +217,7 @@ pub fn mid_with_options_and_stats(
     stats: &mut SearchStats,
     move_ordering: &MoveOrderingOptions,
 ) -> (u32, u32) {
-    if stats.check_deadline(ctx.config()) {
+    if stats.check_limits(ctx.config()) {
         return (u32::MAX - 1, u32::MAX - 1);
     }
     stats.positions_inspected += 1;
@@ -276,7 +276,7 @@ pub fn mid_with_options_and_stats(
 
     // 4. 多重反復深化
     loop {
-        if stats.check_deadline(ctx.config()) {
+        if stats.check_limits(ctx.config()) {
             return (u32::MAX - 1, u32::MAX - 1);
         }
         let phi_sum = phi_sum(dfpn_tbl, &children);
@@ -495,7 +495,33 @@ mod tests {
         );
 
         assert_eq!(result, (u32::MAX - 1, u32::MAX - 1));
-        assert!(stats.timed_out);
+        assert!(stats.limit_reached);
+    }
+
+    #[test]
+    fn position_limit_stops_search() {
+        let position =
+            PartialPosition::from_usi("sfen 3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1")
+                .unwrap();
+        let wrapped = PositionWrapper::new(position);
+        let mut table = DfPnTable::new(1 << 12);
+        let mut stats = SearchStats::default();
+
+        let result = mid_with_options_and_stats(
+            &mut table,
+            &wrapped,
+            (10, 10),
+            NodeKind::Or,
+            true,
+            &mut SearchCtx::with_config(crate::SearchConfig::with_max_positions(0)),
+            false,
+            &mut stats,
+            &MoveOrderingOptions::default(),
+        );
+
+        assert_eq!(result, (u32::MAX - 1, u32::MAX - 1));
+        assert!(stats.limit_reached);
+        assert_eq!(stats.positions_inspected, 0);
     }
 
     #[test]
