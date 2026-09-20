@@ -33,7 +33,7 @@ explicitly requested.
 - Done: deterministic static feature extraction, merged as PR #21.
 - Done: NNUE-style inference runtime, merged as PR #23.
 
-The remaining work starts from the merged NNUE runtime. PR 6 is the current implementation PR and adds the first training-example and export path without committing generated datasets or trained weights.
+The remaining work starts from the merged NNUE runtime. PR 6 is the current implementation PR and adds the first training-example and learning path without committing generated datasets or trained weights.
 
 ## Remaining PRs
 
@@ -83,12 +83,12 @@ The remaining work starts from the merged NNUE runtime. PR 6 is the current impl
   - [x] Add deterministic mirror/replay augmentation with source, transform, and ply metadata.
   - [x] Define labels per candidate by whether its child position is proven to lead to mate under the selected evaluator; do not use the root-selected move as a proxy.
   - [x] Add a configurable generation timeout that writes partial output instead of running indefinitely.
-  - [x] Add export tooling for the versioned runtime weight format.
+  - [x] Add learning tooling for the versioned runtime weight format.
   - [x] Keep generated large datasets and trained weights out of the repository unless explicitly approved.
 - Functional test:
-  - Run the training/export command on a tiny local fixture.
-  - Inspect generated examples and exported weights.
-  - Load the exported fixture through the runtime path and confirm it produces usable output.
+  - Run the training command on a tiny local fixture.
+  - Inspect generated examples and learned weights.
+  - Load the learned fixture through the runtime path and confirm it produces usable output.
 - Self review:
   - [x] Add smoke or round-trip tests.
   - Confirm training dependencies are separate from solver runtime dependencies.

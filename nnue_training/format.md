@@ -27,7 +27,7 @@
 
 ## Training-example JSONL
 
-`export`と`score`が読む学習例ファイル。すべてのフィールドが必須。
+`learn`と`score`が読む学習例ファイル。すべてのフィールドが必須。
 
 ```json
 {"id":"mate5::identity::ply0","source_id":"mate5","sfen":"3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1","role":"attacker","move_usi":"5c4b+","label":1,"transform":"identity","ply_offset":0}
@@ -44,7 +44,7 @@
 
 ## NNUE-FIXTURE model
 
-`export`が書き、`mate_solver::nnue::NnueScorer::from_model`と`score`が読むテキスト形式。
+`init`と`learn`が書き、`mate_solver::nnue::NnueScorer::from_model`と`score`が読むテキスト形式。`learn`は入力モデルを初期値として使い、学習後のモデルを出力する。
 
 ```text
 NNUE-FIXTURE 1

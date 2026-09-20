@@ -55,7 +55,7 @@ impl NnueScorer {
         self.feature_count += 1;
     }
 
-    /// Loads the versioned text format emitted by `nnue_training export`.
+    /// Loads the versioned text format emitted by `nnue_training learn`.
     pub fn from_model(text: &str) -> Result<Self, String> {
         let mut scorer = Self::empty();
         let mut lines = text.lines();
@@ -183,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    fn exported_model_round_trips_into_runtime() {
+    fn learned_model_round_trips_into_runtime() {
         let model = "NNUE-FIXTURE 1\nhidden_units 2\nhidden_bias 0 0\noutput_weights 2 1\noutput_bias 0\noutput_shift 7\nfeature 30300 64 32\n";
         let scorer = NnueScorer::from_model(model).unwrap();
 
