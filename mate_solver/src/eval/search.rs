@@ -1,12 +1,12 @@
-use shogi_core::{Hand, Move, PartialPosition, Piece, ToUsi};
-use std::collections::BTreeSet;
-
 use crate::{
     features::FeatureRole,
     move_ordering::{order_eval_moves_with_role, MoveOrderingOptions},
     position_wrapper::{Key, PositionWrapper},
     tt::{DfPnTable, EvalTable},
+    SearchConfig,
 };
+use shogi_core::{Hand, Move, PartialPosition, Piece, ToUsi};
+use std::collections::BTreeSet;
 
 use super::Value;
 
@@ -15,11 +15,31 @@ const LOG_THRESHOLD: usize = 3;
 #[derive(Clone, Default)]
 pub struct SearchCtx {
     seq: Vec<Move>,
+    config: SearchConfig,
+}
+
+impl SearchCtx {
+    pub fn with_config(config: SearchConfig) -> Self {
+        Self {
+            seq: vec![],
+            config,
+        }
+    }
+
+    pub fn config(&self) -> SearchConfig {
+        self.config
+    }
+
+    fn check_limits(&self, positions_inspected: u64) -> bool {
+        self.config.limit_reached(positions_inspected)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
+/// Search counters and terminal status. Search limits belong to `SearchConfig`.
 pub struct SearchStats {
     pub positions_inspected: u64,
+    pub limit_reached: bool,
 }
 
 impl SearchCtx {
@@ -223,6 +243,10 @@ pub fn alpha_beta_me_with_options_and_stats(
     df_pn_stats: &mut crate::df_pn::search::SearchStats,
     move_ordering: &MoveOrderingOptions,
 ) -> (Value, Option<Move>) {
+    if ctx.check_limits(stats.positions_inspected) {
+        stats.limit_reached = true;
+        return (Value::INF, None);
+    }
     stats.positions_inspected += 1;
     if beta.plies() == 0 {
         // 0 手で詰ますことはできない。攻め方にとって最悪の評価値を返す。
@@ -242,11 +266,14 @@ pub fn alpha_beta_me_with_options_and_stats(
             (10, 10),
             crate::df_pn::search::NodeKind::Or,
             false,
-            &mut Default::default(),
+            &mut crate::df_pn::search::SearchCtx::with_config(ctx.config()),
             verbose,
             df_pn_stats,
             move_ordering,
         );
+        if df_pn_stats.limit_reached {
+            return (Value::INF, None);
+        }
         if mate_result == (u32::MAX, 0) {
             // 不詰を読み切れたので攻め方にとって最悪の評価値を返す。
             return (Value::INF, None);
@@ -286,6 +313,10 @@ pub fn alpha_beta_me_with_options_and_stats(
 
     let mut best = None;
     for mv in all {
+        if ctx.check_limits(stats.positions_inspected) {
+            stats.limit_reached = true;
+            return (Value::INF, None);
+        }
         let new_alpha = one_less(alpha);
         let new_beta = one_less(beta);
         let mut next = position.clone();
@@ -306,6 +337,9 @@ pub fn alpha_beta_me_with_options_and_stats(
         )
         .0;
         ctx.pop();
+        if stats.limit_reached || df_pn_stats.limit_reached {
+            return (Value::INF, None);
+        }
         let eval = eval.plies_added_unchecked(1);
         if eval < beta {
             best = Some(mv);
@@ -432,6 +466,10 @@ pub fn alpha_beta_you_with_options_and_stats(
     df_pn_stats: &mut crate::df_pn::search::SearchStats,
     move_ordering: &MoveOrderingOptions,
 ) -> (Value, Option<Move>) {
+    if ctx.check_limits(stats.positions_inspected) {
+        stats.limit_reached = true;
+        return (Value::INF, None);
+    }
     stats.positions_inspected += 1;
     if let Some((dn, pn)) = df_pn.fetch(position.zobrist_hash()) {
         if (pn, dn) == (u32::MAX, 0) {
@@ -491,6 +529,10 @@ pub fn alpha_beta_you_with_options_and_stats(
 
     let mut best = None;
     for &mv in &all {
+        if ctx.check_limits(stats.positions_inspected) {
+            stats.limit_reached = true;
+            return (Value::INF, None);
+        }
         let new_alpha = one_less(alpha);
         let new_beta = one_less(beta);
 
@@ -512,6 +554,9 @@ pub fn alpha_beta_you_with_options_and_stats(
         )
         .0;
         ctx.pop();
+        if stats.limit_reached || df_pn_stats.limit_reached {
+            return (Value::INF, None);
+        }
         let eval = eval.plies_added_unchecked(1);
         if eval > alpha {
             best = Some(mv);

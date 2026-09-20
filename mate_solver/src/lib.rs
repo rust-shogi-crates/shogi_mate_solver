@@ -1,4 +1,7 @@
-use std::collections::{BTreeSet, HashMap};
+use std::{
+    collections::{BTreeSet, HashMap},
+    time::Instant,
+};
 
 use df_pn::search as dfpnsearch;
 use eval::{search as evalsearch, Value};
@@ -13,6 +16,61 @@ pub mod move_ordering;
 pub mod nnue;
 pub mod position_wrapper;
 pub mod tt;
+
+/// Optional limits and other controls for a search invocation.
+///
+/// On `wasm32`, a deadline is intentionally ignored because the standard
+/// library cannot provide a reliable monotonic clock on every WASM host.
+/// `max_positions` remains available there as a deterministic limit.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SearchConfig {
+    deadline: Option<Instant>,
+    max_positions: Option<u64>,
+}
+
+impl SearchConfig {
+    pub fn with_deadline(deadline: Instant) -> Self {
+        Self {
+            deadline: Some(deadline),
+            max_positions: None,
+        }
+    }
+
+    pub fn with_max_positions(max_positions: u64) -> Self {
+        Self {
+            deadline: None,
+            max_positions: Some(max_positions),
+        }
+    }
+
+    pub fn with_deadline_and_max_positions(deadline: Instant, max_positions: u64) -> Self {
+        Self {
+            deadline: Some(deadline),
+            max_positions: Some(max_positions),
+        }
+    }
+
+    pub(crate) fn limit_reached(self, positions_inspected: u64) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            // `std::time::Instant::now()` is not available on all WASM hosts.
+            // Ignore an optional native deadline instead of producing a panic
+            // or a false timeout and returning a bogus search result.
+            let _ = self.deadline;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if self
+                .deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
+            {
+                return true;
+            }
+        }
+        self.max_positions
+            .is_some_and(|max| positions_inspected >= max)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Answer {

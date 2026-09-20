@@ -1,13 +1,13 @@
 // 長井, 今井: df-pnアルゴリズムの詰将棋を解くプログラムへの応用.
 
-use shogi_core::{Move, Square};
-
 use crate::{
     features::FeatureRole,
     move_ordering::{order_df_pn_moves, MoveOrderingOptions},
     position_wrapper::{Key, PositionWrapper},
     tt::DfPnTable,
+    SearchConfig,
 };
+use shogi_core::{Move, Square};
 
 #[derive(Clone, Copy)]
 pub enum NodeKind {
@@ -29,11 +29,31 @@ impl NodeKind {
 #[derive(Clone, Default)]
 pub struct SearchCtx {
     seq: Vec<Move>,
+    config: SearchConfig,
+}
+
+impl SearchCtx {
+    pub fn with_config(config: SearchConfig) -> Self {
+        Self {
+            seq: vec![],
+            config,
+        }
+    }
+
+    pub fn config(&self) -> SearchConfig {
+        self.config
+    }
+
+    fn check_limits(&self, positions_inspected: u64) -> bool {
+        self.config.limit_reached(positions_inspected)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
+/// Search counters and terminal status. Search limits belong to `SearchConfig`.
 pub struct SearchStats {
     pub positions_inspected: u64,
+    pub limit_reached: bool,
 }
 
 impl SearchCtx {
@@ -192,6 +212,10 @@ pub fn mid_with_options_and_stats(
     stats: &mut SearchStats,
     move_ordering: &MoveOrderingOptions,
 ) -> (u32, u32) {
+    if ctx.check_limits(stats.positions_inspected) {
+        stats.limit_reached = true;
+        return (u32::MAX - 1, u32::MAX - 1);
+    }
     stats.positions_inspected += 1;
     if ctx.seq.len() >= 50 {
         panic!();
@@ -248,6 +272,10 @@ pub fn mid_with_options_and_stats(
 
     // 4. 多重反復深化
     loop {
+        if ctx.check_limits(stats.positions_inspected) {
+            stats.limit_reached = true;
+            return (u32::MAX - 1, u32::MAX - 1);
+        }
         let phi_sum = phi_sum(dfpn_tbl, &children);
         let delta_min = delta_min(dfpn_tbl, &children);
 
@@ -380,6 +408,8 @@ fn phi_sum(dfpn_tbl: &DfPnTable, children: &[(Move, Key)]) -> u32 {
 mod tests {
     use super::*;
     use shogi_core::PartialPosition;
+    use shogi_usi_parser::FromUsi;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn solve_mate_problem_works_0() {
@@ -437,6 +467,58 @@ mod tests {
         let result = df_pn(&mut dfpn_tbl, &tmp, false);
         // 不詰
         assert_eq!(result, (u32::MAX, 0));
+    }
+
+    #[test]
+    fn expired_deadline_stops_search() {
+        let position =
+            PartialPosition::from_usi("sfen 3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1")
+                .unwrap();
+        let wrapped = PositionWrapper::new(position);
+        let mut table = DfPnTable::new(1 << 12);
+        let config = crate::SearchConfig::with_deadline(Instant::now() - Duration::from_secs(1));
+        let mut stats = SearchStats::default();
+
+        let result = mid_with_options_and_stats(
+            &mut table,
+            &wrapped,
+            (10, 10),
+            NodeKind::Or,
+            true,
+            &mut SearchCtx::with_config(config),
+            false,
+            &mut stats,
+            &MoveOrderingOptions::default(),
+        );
+
+        assert_eq!(result, (u32::MAX - 1, u32::MAX - 1));
+        assert!(stats.limit_reached);
+    }
+
+    #[test]
+    fn position_limit_stops_search() {
+        let position =
+            PartialPosition::from_usi("sfen 3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1")
+                .unwrap();
+        let wrapped = PositionWrapper::new(position);
+        let mut table = DfPnTable::new(1 << 12);
+        let mut stats = SearchStats::default();
+
+        let result = mid_with_options_and_stats(
+            &mut table,
+            &wrapped,
+            (10, 10),
+            NodeKind::Or,
+            true,
+            &mut SearchCtx::with_config(crate::SearchConfig::with_max_positions(0)),
+            false,
+            &mut stats,
+            &MoveOrderingOptions::default(),
+        );
+
+        assert_eq!(result, (u32::MAX - 1, u32::MAX - 1));
+        assert!(stats.limit_reached);
+        assert_eq!(stats.positions_inspected, 0);
     }
 
     #[test]

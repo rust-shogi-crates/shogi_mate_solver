@@ -1,6 +1,13 @@
 use crate::features::FeatureId;
 
+pub mod parse;
+
 const HIDDEN_UNITS: usize = 2;
+const MAX_FEATURE_WEIGHTS: usize = 256;
+const EMPTY_FEATURE_WEIGHT: FeatureWeight = FeatureWeight {
+    feature: FeatureId(0),
+    weights: [0; HIDDEN_UNITS],
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct FeatureWeight {
@@ -8,10 +15,11 @@ struct FeatureWeight {
     weights: [i32; HIDDEN_UNITS],
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NnueScorer {
     hidden_bias: [i32; HIDDEN_UNITS],
-    feature_weights: &'static [FeatureWeight],
+    feature_weights: Box<[FeatureWeight; MAX_FEATURE_WEIGHTS]>,
+    feature_count: usize,
     output_weights: [i32; HIDDEN_UNITS],
     output_bias: i32,
     output_shift: u32,
@@ -19,41 +27,52 @@ pub struct NnueScorer {
 
 impl Default for NnueScorer {
     fn default() -> Self {
+        let mut scorer = Self::empty();
+        // The fixture intentionally gives promoted moves a positive signal.
+        scorer.add_feature(FeatureId(30_300), [64, 32]);
+        scorer.add_feature(FeatureId(0), [128, -128]);
+        scorer.add_feature(FeatureId(1), [-128, 128]);
+        // FeatureId(30_001) is DROP_MOVE_KIND; the fixture favors drops.
+        scorer.add_feature(FeatureId(30_001), [64, 32]);
+        scorer
+    }
+}
+
+impl NnueScorer {
+    fn empty() -> Self {
         Self {
             hidden_bias: [0, 0],
-            feature_weights: &[
-                // The fixture intentionally gives promoted moves a positive signal.
-                FeatureWeight {
-                    feature: FeatureId(30_300),
-                    weights: [64, 32],
-                },
-                FeatureWeight {
-                    feature: FeatureId(0),
-                    weights: [128, -128],
-                },
-                FeatureWeight {
-                    feature: FeatureId(1),
-                    weights: [-128, 128],
-                },
-                // FeatureId(30_001) is DROP_MOVE_KIND; the fixture favors drops.
-                FeatureWeight {
-                    feature: FeatureId(30_001),
-                    weights: [64, 32],
-                },
-            ],
+            feature_weights: Box::new([EMPTY_FEATURE_WEIGHT; MAX_FEATURE_WEIGHTS]),
+            feature_count: 0,
             output_weights: [2, 1],
             output_bias: 0,
             output_shift: 7,
         }
     }
-}
 
-impl NnueScorer {
+    fn add_feature(&mut self, feature: FeatureId, weights: [i32; HIDDEN_UNITS]) {
+        self.feature_weights[self.feature_count] = FeatureWeight { feature, weights };
+        self.feature_count += 1;
+    }
+
+    /// Loads the versioned text format emitted by `nnue_training learn`.
+    pub fn from_model(text: &str) -> Result<Self, String> {
+        let model = parse::parse_model(text)?;
+        let mut scorer = Self::empty();
+        scorer.hidden_bias = model.hidden_bias;
+        scorer.output_weights = model.output_weights;
+        scorer.output_bias = model.output_bias;
+        scorer.output_shift = model.output_shift;
+        for (feature, weights) in model.feature_weights {
+            scorer.add_feature(FeatureId(feature), weights);
+        }
+        Ok(scorer)
+    }
+
     pub fn score(&self, features: &[FeatureId]) -> i32 {
         let mut hidden = self.hidden_bias;
         for &feature in features {
-            if let Some(weight) = self
-                .feature_weights
+            if let Some(weight) = self.feature_weights[..self.feature_count]
                 .iter()
                 .find(|weight| weight.feature == feature)
             {
@@ -97,6 +116,34 @@ mod tests {
         let scorer = NnueScorer::default();
 
         assert!(scorer.score(&[FeatureId(30_001)]) > scorer.score(&[]));
+    }
+
+    #[test]
+    fn learned_model_round_trips_into_runtime() {
+        let model = "NNUE-FIXTURE 1\nhidden_units 2\nhidden_bias 0 0\noutput_weights 2 1\noutput_bias 0\noutput_shift 7\nfeature 30300 64 32\n";
+        let scorer = NnueScorer::from_model(model).unwrap();
+
+        assert_eq!(scorer.score(&[FeatureId(30_300)]), 1);
+    }
+
+    #[test]
+    fn model_requires_all_runtime_fields() {
+        let model = "NNUE-FIXTURE 1\nhidden_units 2\n";
+
+        assert_eq!(
+            NnueScorer::from_model(model),
+            Err("model is missing required fields".to_owned())
+        );
+    }
+
+    #[test]
+    fn model_rejects_unsafe_output_shift() {
+        let model = "NNUE-FIXTURE 1\nhidden_units 2\nhidden_bias 0 0\noutput_weights 2 1\noutput_bias 0\noutput_shift 32\n";
+
+        assert_eq!(
+            NnueScorer::from_model(model),
+            Err("output_shift must be less than 32".to_owned())
+        );
     }
 
     #[test]

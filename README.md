@@ -63,3 +63,7 @@ cargo run -p benchmark_harness -- compare --base benchmark-base.jsonl --current 
 `--html` を指定すると、同じ統計を人間が読みやすい HTML レポートにも出力する。
 
 エラーも同じ JSONL ストリームに出力される。CI では標準出力を `benchmark-base.jsonl`, `benchmark-current.jsonl`, `benchmark-comparison.jsonl` にリダイレクトし、`benchmark-report.html` と一緒に artifacts として保存する。
+
+# nnue_training
+
+詳細は [`nnue_training/README.md`](nnue_training/README.md) を参照。
