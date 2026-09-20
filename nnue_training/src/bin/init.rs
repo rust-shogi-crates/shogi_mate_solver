@@ -1,12 +1,6 @@
 use std::{env, fs, process};
 
-const EMPTY_MODEL: &str = "NNUE-FIXTURE 1
-hidden_units 2
-hidden_bias 0 0
-output_weights 2 1
-output_bias 0
-output_shift 7
-";
+use mate_solver::nnue::parse::Model;
 
 fn main() {
     if let Err(message) = run() {
@@ -28,5 +22,6 @@ fn run() -> Result<(), String> {
         }
     }
     let output_path = output_path.ok_or("missing --output")?;
-    fs::write(&output_path, EMPTY_MODEL).map_err(|error| format!("write {output_path}: {error}"))
+    fs::write(&output_path, Model::empty().to_text())
+        .map_err(|error| format!("write {output_path}: {error}"))
 }

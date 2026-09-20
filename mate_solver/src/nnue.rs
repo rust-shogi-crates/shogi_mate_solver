@@ -1,6 +1,6 @@
 use crate::features::FeatureId;
 
-mod parse;
+pub mod parse;
 
 const HIDDEN_UNITS: usize = 2;
 const MAX_FEATURE_WEIGHTS: usize = 256;
@@ -57,78 +57,14 @@ impl NnueScorer {
 
     /// Loads the versioned text format emitted by `nnue_training learn`.
     pub fn from_model(text: &str) -> Result<Self, String> {
+        let model = parse::parse_model(text)?;
         let mut scorer = Self::empty();
-        let mut lines = text.lines();
-        if lines.next() != Some("NNUE-FIXTURE 1") {
-            return Err("expected NNUE-FIXTURE 1 header".to_owned());
-        }
-        let mut seen_hidden_units = false;
-        let mut seen_hidden_bias = false;
-        let mut seen_output_weights = false;
-        let mut seen_output_bias = false;
-        let mut seen_output_shift = false;
-
-        for line in lines {
-            let mut fields = line.split_whitespace();
-            match fields.next() {
-                Some("hidden_units") => {
-                    if seen_hidden_units {
-                        return Err("duplicate hidden_units".to_owned());
-                    }
-                    parse::expect_values(&mut fields, &["2"], "hidden_units")?;
-                    seen_hidden_units = true;
-                }
-                Some("hidden_bias") => {
-                    if seen_hidden_bias {
-                        return Err("duplicate hidden_bias".to_owned());
-                    }
-                    scorer.hidden_bias = parse::parse_pair(&mut fields, "hidden_bias")?;
-                    seen_hidden_bias = true;
-                }
-                Some("output_weights") => {
-                    if seen_output_weights {
-                        return Err("duplicate output_weights".to_owned());
-                    }
-                    scorer.output_weights = parse::parse_pair(&mut fields, "output_weights")?;
-                    seen_output_weights = true;
-                }
-                Some("output_bias") => {
-                    if seen_output_bias {
-                        return Err("duplicate output_bias".to_owned());
-                    }
-                    scorer.output_bias = parse::parse_one(&mut fields, "output_bias")?;
-                    seen_output_bias = true;
-                }
-                Some("output_shift") => {
-                    if seen_output_shift {
-                        return Err("duplicate output_shift".to_owned());
-                    }
-                    let output_shift = parse::parse_unsigned(&mut fields, "output_shift")?;
-                    if output_shift >= i32::BITS {
-                        return Err("output_shift must be less than 32".to_owned());
-                    }
-                    scorer.output_shift = output_shift;
-                    seen_output_shift = true;
-                }
-                Some("feature") => {
-                    if scorer.feature_count == MAX_FEATURE_WEIGHTS {
-                        return Err("too many feature weights".to_owned());
-                    }
-                    let feature = parse::parse_feature(&mut fields)?;
-                    let weights = parse::parse_pair(&mut fields, "feature weights")?;
-                    scorer.add_feature(FeatureId(feature), weights);
-                }
-                Some(other) => return Err(format!("unknown model field: {other}")),
-                None => {}
-            }
-        }
-        if !seen_hidden_units
-            || !seen_hidden_bias
-            || !seen_output_weights
-            || !seen_output_bias
-            || !seen_output_shift
-        {
-            return Err("model is missing required fields".to_owned());
+        scorer.hidden_bias = model.hidden_bias;
+        scorer.output_weights = model.output_weights;
+        scorer.output_bias = model.output_bias;
+        scorer.output_shift = model.output_shift;
+        for (feature, weights) in model.feature_weights {
+            scorer.add_feature(FeatureId(feature), weights);
         }
         Ok(scorer)
     }
