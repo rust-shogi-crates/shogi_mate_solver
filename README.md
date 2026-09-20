@@ -66,7 +66,7 @@ cargo run -p benchmark_harness -- compare --base benchmark-base.jsonl --current 
 
 # nnue_training
 
-`nnue_training` は benchmark の検索結果から小さな move-ordering 用の学習データを作り、ランタイム形式へ export する。学習例の label は候補手ごとの子局面を指定した evaluator で再評価し、攻め方にとって詰みが証明された手を `1`、それ以外を `0` とする。DF-PN のラベル探索には有限の proof/disproof 閾値を使い、閾値内に証明できない局面は `0` とする。生成物は repository に commit しない。
+`nnue_training` には、benchmark の検索結果から move-ordering 用の学習例を生成する `generate`、学習例をランタイム形式へ変換する `export`、モデルのスコアを確認する `score` の3つのバイナリがある。`generate` は候補手ごとの子局面を指定した evaluator で再評価し、攻め方にとって詰みと判定された手を `1`、それ以外を `0` とする。DF-PN の判定には有限の proof/disproof 閾値を使い、閾値内に詰みを証明できない局面は `0` とする。生成物は repository に commit しない。
 
 ```
 cargo run --release -p benchmark_harness -- run --strict --move-ordering=nnue-fixture --revision=fixture benchmark/issue16-ordering.jsonl > /tmp/benchmark-results.jsonl
