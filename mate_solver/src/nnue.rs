@@ -62,22 +62,53 @@ impl NnueScorer {
         if lines.next() != Some("NNUE-FIXTURE 1") {
             return Err("expected NNUE-FIXTURE 1 header".to_owned());
         }
+        let mut seen_hidden_units = false;
+        let mut seen_hidden_bias = false;
+        let mut seen_output_weights = false;
+        let mut seen_output_bias = false;
+        let mut seen_output_shift = false;
 
         for line in lines {
             let mut fields = line.split_whitespace();
             match fields.next() {
-                Some("hidden_units") => parse::expect_values(&mut fields, &["2"], "hidden_units")?,
+                Some("hidden_units") => {
+                    if seen_hidden_units {
+                        return Err("duplicate hidden_units".to_owned());
+                    }
+                    parse::expect_values(&mut fields, &["2"], "hidden_units")?;
+                    seen_hidden_units = true;
+                }
                 Some("hidden_bias") => {
+                    if seen_hidden_bias {
+                        return Err("duplicate hidden_bias".to_owned());
+                    }
                     scorer.hidden_bias = parse::parse_pair(&mut fields, "hidden_bias")?;
+                    seen_hidden_bias = true;
                 }
                 Some("output_weights") => {
+                    if seen_output_weights {
+                        return Err("duplicate output_weights".to_owned());
+                    }
                     scorer.output_weights = parse::parse_pair(&mut fields, "output_weights")?;
+                    seen_output_weights = true;
                 }
                 Some("output_bias") => {
+                    if seen_output_bias {
+                        return Err("duplicate output_bias".to_owned());
+                    }
                     scorer.output_bias = parse::parse_one(&mut fields, "output_bias")?;
+                    seen_output_bias = true;
                 }
                 Some("output_shift") => {
-                    scorer.output_shift = parse::parse_unsigned(&mut fields, "output_shift")?;
+                    if seen_output_shift {
+                        return Err("duplicate output_shift".to_owned());
+                    }
+                    let output_shift = parse::parse_unsigned(&mut fields, "output_shift")?;
+                    if output_shift >= i32::BITS {
+                        return Err("output_shift must be less than 32".to_owned());
+                    }
+                    scorer.output_shift = output_shift;
+                    seen_output_shift = true;
                 }
                 Some("feature") => {
                     if scorer.feature_count == MAX_FEATURE_WEIGHTS {
@@ -90,6 +121,14 @@ impl NnueScorer {
                 Some(other) => return Err(format!("unknown model field: {other}")),
                 None => {}
             }
+        }
+        if !seen_hidden_units
+            || !seen_hidden_bias
+            || !seen_output_weights
+            || !seen_output_bias
+            || !seen_output_shift
+        {
+            return Err("model is missing required fields".to_owned());
         }
         Ok(scorer)
     }
@@ -149,6 +188,26 @@ mod tests {
         let scorer = NnueScorer::from_model(model).unwrap();
 
         assert_eq!(scorer.score(&[FeatureId(30_300)]), 1);
+    }
+
+    #[test]
+    fn model_requires_all_runtime_fields() {
+        let model = "NNUE-FIXTURE 1\nhidden_units 2\n";
+
+        assert_eq!(
+            NnueScorer::from_model(model),
+            Err("model is missing required fields".to_owned())
+        );
+    }
+
+    #[test]
+    fn model_rejects_unsafe_output_shift() {
+        let model = "NNUE-FIXTURE 1\nhidden_units 2\nhidden_bias 0 0\noutput_weights 2 1\noutput_bias 0\noutput_shift 32\n";
+
+        assert_eq!(
+            NnueScorer::from_model(model),
+            Err("output_shift must be less than 32".to_owned())
+        );
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use shogi_core::{Hand, Move, PartialPosition, Piece, ToUsi};
 use std::collections::BTreeSet;
+use std::time::Instant;
 
 use crate::{
     features::FeatureRole,
@@ -20,6 +21,27 @@ pub struct SearchCtx {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SearchStats {
     pub positions_inspected: u64,
+    pub deadline: Option<Instant>,
+    pub timed_out: bool,
+}
+
+impl SearchStats {
+    pub fn with_deadline(deadline: Instant) -> Self {
+        Self {
+            deadline: Some(deadline),
+            ..Self::default()
+        }
+    }
+
+    fn check_deadline(&mut self) -> bool {
+        if self
+            .deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            self.timed_out = true;
+        }
+        self.timed_out
+    }
 }
 
 impl SearchCtx {
@@ -223,6 +245,9 @@ pub fn alpha_beta_me_with_options_and_stats(
     df_pn_stats: &mut crate::df_pn::search::SearchStats,
     move_ordering: &MoveOrderingOptions,
 ) -> (Value, Option<Move>) {
+    if stats.check_deadline() {
+        return (Value::INF, None);
+    }
     stats.positions_inspected += 1;
     if beta.plies() == 0 {
         // 0 手で詰ますことはできない。攻め方にとって最悪の評価値を返す。
@@ -247,6 +272,9 @@ pub fn alpha_beta_me_with_options_and_stats(
             df_pn_stats,
             move_ordering,
         );
+        if df_pn_stats.timed_out {
+            return (Value::INF, None);
+        }
         if mate_result == (u32::MAX, 0) {
             // 不詰を読み切れたので攻め方にとって最悪の評価値を返す。
             return (Value::INF, None);
@@ -286,6 +314,9 @@ pub fn alpha_beta_me_with_options_and_stats(
 
     let mut best = None;
     for mv in all {
+        if stats.check_deadline() {
+            return (Value::INF, None);
+        }
         let new_alpha = one_less(alpha);
         let new_beta = one_less(beta);
         let mut next = position.clone();
@@ -306,6 +337,9 @@ pub fn alpha_beta_me_with_options_and_stats(
         )
         .0;
         ctx.pop();
+        if stats.timed_out || df_pn_stats.timed_out {
+            return (Value::INF, None);
+        }
         let eval = eval.plies_added_unchecked(1);
         if eval < beta {
             best = Some(mv);
@@ -432,6 +466,9 @@ pub fn alpha_beta_you_with_options_and_stats(
     df_pn_stats: &mut crate::df_pn::search::SearchStats,
     move_ordering: &MoveOrderingOptions,
 ) -> (Value, Option<Move>) {
+    if stats.check_deadline() {
+        return (Value::INF, None);
+    }
     stats.positions_inspected += 1;
     if let Some((dn, pn)) = df_pn.fetch(position.zobrist_hash()) {
         if (pn, dn) == (u32::MAX, 0) {
@@ -491,6 +528,9 @@ pub fn alpha_beta_you_with_options_and_stats(
 
     let mut best = None;
     for &mv in &all {
+        if stats.check_deadline() {
+            return (Value::INF, None);
+        }
         let new_alpha = one_less(alpha);
         let new_beta = one_less(beta);
 
@@ -512,6 +552,9 @@ pub fn alpha_beta_you_with_options_and_stats(
         )
         .0;
         ctx.pop();
+        if stats.timed_out || df_pn_stats.timed_out {
+            return (Value::INF, None);
+        }
         let eval = eval.plies_added_unchecked(1);
         if eval > alpha {
             best = Some(mv);

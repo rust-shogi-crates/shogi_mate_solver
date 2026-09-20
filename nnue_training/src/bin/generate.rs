@@ -157,7 +157,9 @@ fn run() -> Result<(), String> {
                 if state.check_timeout() {
                     break;
                 }
-                if let Some((sfen, _chosen_move)) = replay_and_label(&position, ply_offset) {
+                if let Some((sfen, _chosen_move)) =
+                    replay_and_label(&position, ply_offset, &mut state)
+                {
                     append_examples(
                         &mut output,
                         &id,
@@ -226,9 +228,12 @@ fn append_examples(
             break;
         }
         let move_usi = mv.to_usi_owned();
-        let label = u8::from(move_leads_to_mate(
-            &wrapped, mv, role, evaluator, &mut df_pn, &mut eval,
-        )?);
+        let label = match move_leads_to_mate(
+            &wrapped, mv, role, evaluator, &mut df_pn, &mut eval, state,
+        )? {
+            Some(label) => u8::from(label),
+            None => break,
+        };
         let example = TrainingExample {
             id: id.clone(),
             source_id: source_id.to_owned(),
@@ -255,9 +260,17 @@ fn move_leads_to_mate(
     evaluator: &str,
     df_pn: &mut DfPnTable,
     eval: &mut EvalTable,
-) -> Result<bool, String> {
+    state: &mut GenerationState,
+) -> Result<Option<bool>, String> {
+    if state.check_timeout() {
+        state.timed_out = true;
+        return Ok(None);
+    }
     let mut child = position.clone();
     child.make_move(mv);
+    if role == FeatureRole::Attacker && child.all_evasions().is_empty() {
+        return Ok(Some(true));
+    }
     match evaluator {
         "df_pn" => {
             let node_kind = match role {
@@ -265,6 +278,7 @@ fn move_leads_to_mate(
                 FeatureRole::Defender => dfpnsearch::NodeKind::Or,
                 _ => return Err("unsupported feature role".to_owned()),
             };
+            let mut stats = dfpnsearch::SearchStats::with_deadline(state.deadline);
             let result = dfpnsearch::mid_with_options_and_stats(
                 df_pn,
                 &child,
@@ -273,16 +287,23 @@ fn move_leads_to_mate(
                 true,
                 &mut Default::default(),
                 false,
-                &mut Default::default(),
+                &mut stats,
                 &MoveOrderingOptions::default(),
             );
-            Ok(result == (0, u32::MAX))
+            if stats.timed_out || state.check_timeout() {
+                state.timed_out = true;
+                Ok(None)
+            } else {
+                Ok(Some(result == (0, u32::MAX)))
+            }
         }
         "eval" => {
             // Unproven positions are intentionally labeled non-mate. Keep
             // this bounded so generation-level timeouts remain effective.
+            let mut eval_stats = evalsearch::SearchStats::with_deadline(state.deadline);
+            let mut dfpn_stats = dfpnsearch::SearchStats::with_deadline(state.deadline);
             let (value, _) = match role {
-                FeatureRole::Attacker => evalsearch::alpha_beta_you_with_options(
+                FeatureRole::Attacker => evalsearch::alpha_beta_you_with_options_and_stats(
                     &child,
                     df_pn,
                     eval,
@@ -291,9 +312,11 @@ fn move_leads_to_mate(
                     &mut BTreeSet::new(),
                     &mut Default::default(),
                     false,
+                    &mut eval_stats,
+                    &mut dfpn_stats,
                     &MoveOrderingOptions::default(),
                 ),
-                FeatureRole::Defender => evalsearch::alpha_beta_me_with_options(
+                FeatureRole::Defender => evalsearch::alpha_beta_me_with_options_and_stats(
                     &child,
                     df_pn,
                     eval,
@@ -302,17 +325,28 @@ fn move_leads_to_mate(
                     &mut BTreeSet::new(),
                     &mut Default::default(),
                     false,
+                    &mut eval_stats,
+                    &mut dfpn_stats,
                     &MoveOrderingOptions::default(),
                 ),
                 _ => return Err("unsupported feature role".to_owned()),
             };
-            Ok(value.is_mate())
+            if eval_stats.timed_out || dfpn_stats.timed_out || state.check_timeout() {
+                state.timed_out = true;
+                Ok(None)
+            } else {
+                Ok(Some(value.is_mate()))
+            }
         }
         other => Err(format!("unsupported evaluator: {other}")),
     }
 }
 
-fn replay_and_label(position: &PartialPosition, plies: usize) -> Option<(String, String)> {
+fn replay_and_label(
+    position: &PartialPosition,
+    plies: usize,
+    state: &mut GenerationState,
+) -> Option<(String, String)> {
     let mut wrapped = PositionWrapper::new(position.clone());
     for ply in 0..plies {
         let mv = if ply % 2 == 0 {
@@ -325,6 +359,8 @@ fn replay_and_label(position: &PartialPosition, plies: usize) -> Option<(String,
 
     let mut df_pn = DfPnTable::new(1 << 16);
     let mut eval = EvalTable::new(1 << 16);
+    let mut eval_stats = evalsearch::SearchStats::with_deadline(state.deadline);
+    let mut dfpn_stats = dfpnsearch::SearchStats::with_deadline(state.deadline);
     // Augmentation labels use a bounded search so replay cannot turn example
     // generation into an unbounded solver run. The root entry point must
     // match the side to move: odd offsets are defender positions.
@@ -342,10 +378,14 @@ fn replay_and_label(position: &PartialPosition, plies: usize) -> Option<(String,
         &mut BTreeSet::new(),
         &mut Default::default(),
         false,
-        &mut Default::default(),
-        &mut Default::default(),
+        &mut eval_stats,
+        &mut dfpn_stats,
         &MoveOrderingOptions::default(),
     );
+    if eval_stats.timed_out || dfpn_stats.timed_out || state.check_timeout() {
+        state.timed_out = true;
+        return None;
+    }
     Some((wrapped.inner().to_sfen_owned(), best_move?.to_usi_owned()))
 }
 
@@ -473,7 +513,7 @@ mod tests {
         append_examples(
             &mut output,
             "source",
-            "3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1",
+            "5kgnl/9/4+B1pp1/8p/9/9/9/9/9 b 2S2rb3g2s3n3l15p 1",
             "df_pn",
             "identity",
             0,
@@ -486,5 +526,39 @@ mod tests {
             .collect();
         assert!(examples.iter().any(|example| example.label == 1));
         assert!(examples.iter().any(|example| example.label == 0));
+    }
+
+    #[test]
+    fn dfpn_labels_immediate_mate_as_positive() {
+        let positions = ["sfen 8k/7R1/7G1/9/9/9/9/9/K8 b - 1"];
+        let mut found_immediate_mate = false;
+        for sfen in positions {
+            let position = PartialPosition::from_usi(sfen).unwrap();
+            let wrapped = PositionWrapper::new(position);
+            for mv in wrapped.all_checks() {
+                let mut child = wrapped.clone();
+                child.make_move(mv);
+                if child.all_evasions().is_empty() {
+                    found_immediate_mate = true;
+                    let mut df_pn = DfPnTable::new(1 << 16);
+                    let mut eval = EvalTable::new(1 << 16);
+                    let mut state = GenerationState::new(60_000);
+                    assert_eq!(
+                        move_leads_to_mate(
+                            &wrapped,
+                            mv,
+                            FeatureRole::Attacker,
+                            "df_pn",
+                            &mut df_pn,
+                            &mut eval,
+                            &mut state,
+                        )
+                        .unwrap(),
+                        Some(true)
+                    );
+                }
+            }
+        }
+        assert!(found_immediate_mate);
     }
 }

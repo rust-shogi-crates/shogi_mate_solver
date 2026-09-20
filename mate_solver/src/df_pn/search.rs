@@ -1,6 +1,7 @@
 // 長井, 今井: df-pnアルゴリズムの詰将棋を解くプログラムへの応用.
 
 use shogi_core::{Move, Square};
+use std::time::Instant;
 
 use crate::{
     features::FeatureRole,
@@ -34,6 +35,27 @@ pub struct SearchCtx {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SearchStats {
     pub positions_inspected: u64,
+    pub deadline: Option<Instant>,
+    pub timed_out: bool,
+}
+
+impl SearchStats {
+    pub fn with_deadline(deadline: Instant) -> Self {
+        Self {
+            deadline: Some(deadline),
+            ..Self::default()
+        }
+    }
+
+    fn check_deadline(&mut self) -> bool {
+        if self
+            .deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            self.timed_out = true;
+        }
+        self.timed_out
+    }
 }
 
 impl SearchCtx {
@@ -192,6 +214,9 @@ pub fn mid_with_options_and_stats(
     stats: &mut SearchStats,
     move_ordering: &MoveOrderingOptions,
 ) -> (u32, u32) {
+    if stats.check_deadline() {
+        return (u32::MAX - 1, u32::MAX - 1);
+    }
     stats.positions_inspected += 1;
     if ctx.seq.len() >= 50 {
         panic!();
@@ -248,6 +273,9 @@ pub fn mid_with_options_and_stats(
 
     // 4. 多重反復深化
     loop {
+        if stats.check_deadline() {
+            return (u32::MAX - 1, u32::MAX - 1);
+        }
         let phi_sum = phi_sum(dfpn_tbl, &children);
         let delta_min = delta_min(dfpn_tbl, &children);
 
@@ -380,6 +408,8 @@ fn phi_sum(dfpn_tbl: &DfPnTable, children: &[(Move, Key)]) -> u32 {
 mod tests {
     use super::*;
     use shogi_core::PartialPosition;
+    use shogi_usi_parser::FromUsi;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn solve_mate_problem_works_0() {
@@ -437,6 +467,31 @@ mod tests {
         let result = df_pn(&mut dfpn_tbl, &tmp, false);
         // 不詰
         assert_eq!(result, (u32::MAX, 0));
+    }
+
+    #[test]
+    fn expired_deadline_stops_search() {
+        let position =
+            PartialPosition::from_usi("sfen 3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1")
+                .unwrap();
+        let wrapped = PositionWrapper::new(position);
+        let mut table = DfPnTable::new(1 << 12);
+        let mut stats = SearchStats::with_deadline(Instant::now() - Duration::from_secs(1));
+
+        let result = mid_with_options_and_stats(
+            &mut table,
+            &wrapped,
+            (10, 10),
+            NodeKind::Or,
+            true,
+            &mut SearchCtx::default(),
+            false,
+            &mut stats,
+            &MoveOrderingOptions::default(),
+        );
+
+        assert_eq!(result, (u32::MAX - 1, u32::MAX - 1));
+        assert!(stats.timed_out);
     }
 
     #[test]
