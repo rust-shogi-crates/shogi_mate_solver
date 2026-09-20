@@ -130,8 +130,8 @@ fn run() -> Result<(), String> {
         if !results.contains_key(&id) {
             continue;
         }
-        let mut df_pn = DfPnTable::new(1 << 16);
-        let mut eval = EvalTable::new(1 << 16);
+        let mut df_pn = DfPnTable::new(1 << 18);
+        let mut eval = EvalTable::new(1 << 18);
         append_examples(
             &mut output,
             &id,
