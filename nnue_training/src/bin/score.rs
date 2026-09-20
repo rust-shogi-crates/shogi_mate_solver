@@ -21,6 +21,19 @@ struct TrainingExample {
     ply_offset: usize,
 }
 
+#[derive(Serialize)]
+struct ScoreRecord<'a> {
+    id: &'a str,
+    source_id: &'a str,
+    sfen: &'a str,
+    role: &'a str,
+    move_usi: &'a str,
+    label: u8,
+    score: i32,
+    transform: &'a str,
+    ply_offset: usize,
+}
+
 fn main() {
     if let Err(message) = run() {
         eprintln!("error: {message}");
@@ -32,6 +45,7 @@ fn run() -> Result<(), String> {
     let mut args = env::args().skip(1);
     let mut model_path = None;
     let mut examples_path = None;
+    let mut per_example = false;
 
     while let Some(arg) = args.next() {
         if let Some(value) = arg.strip_prefix("--model=") {
@@ -42,6 +56,8 @@ fn run() -> Result<(), String> {
             examples_path = Some(value.to_owned());
         } else if arg == "--examples" {
             examples_path = Some(next_arg(&mut args, "--examples")?);
+        } else if arg == "--per-example" {
+            per_example = true;
         } else {
             return Err(format!("unknown argument: {arg}"));
         }
@@ -75,10 +91,32 @@ fn run() -> Result<(), String> {
             mv,
             role,
         ));
+        if per_example {
+            let record = ScoreRecord {
+                id: &example.id,
+                source_id: &example.source_id,
+                sfen: &example.sfen,
+                role: &example.role,
+                move_usi: &example.move_usi,
+                label: example.label,
+                score,
+                transform: &example.transform,
+                ply_offset: example.ply_offset,
+            };
+            println!(
+                "{}",
+                serde_json::to_string(&record)
+                    .map_err(|error| format!("serialize score: {error}"))?
+            );
+        }
         count += 1;
         positive += usize::from(score > 0);
     }
-    println!("scored {count} examples; {positive} positive scores");
+    if per_example {
+        eprintln!("scored {count} examples; {positive} positive scores");
+    } else {
+        println!("scored {count} examples; {positive} positive scores");
+    }
     Ok(())
 }
 
