@@ -29,7 +29,7 @@ cargo run --release -p nnue_training --bin score -- --model nnue_training/work/n
 cargo run --release -p nnue_training --bin score -- --model nnue_training/work/nnue-model.nnue --examples nnue_training/work/nnue-examples.jsonl --output-file nnue_training/work/nnue-scores.jsonl
 ```
 
-`learn`の入力モデルは、学習開始時点の重みを指定する。`init`は学習開始用の空の仮置きモデルを作る。`learn`は学習後の`NNUE-FIXTURE 1`テキストモデルを`mate_solver::nnue::NnueScorer::from_model`で読み込める形で保存する。学習用の依存関係は独立した`nnue_training` crateに分離してあり、solverのランタイム依存関係には含まれない。
+`learn`の入力モデルは、学習開始時点の重みを指定する。`init`は学習開始用の空の仮置きモデルを作る。現在の`init`は`512 -> 32 -> 32 -> 1`の`NNUE-FIXTURE 2`モデルを作り、`learn`は同じ形式で保存する。solverは`mate_solver::nnue::NnueScorer::from_model`でこの形式を読み込む。`NNUE-FIXTURE 1`も既存モデルの読み込み用に残している。学習用の依存関係は独立した`nnue_training` crateに分離してあり、solverのランタイム依存関係には含まれない。
 
 <!-- FIXME: learnが本格的な訓練器になったら、現在の簡易的な重み更新の説明を追加する。 -->
 

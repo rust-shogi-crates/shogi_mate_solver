@@ -1,6 +1,6 @@
 # nnue_training file formats
 
-`nnue_training`はJSONLと`NNUE-FIXTURE 1`テキストモデルを読む。JSONLは1行1オブジェクトで、未知のフィールドは読み飛ばすが、ここに記載した必須フィールドは省略できない。
+`nnue_training`はJSONLと`NNUE-FIXTURE 1`または`NNUE-FIXTURE 2`テキストモデルを読む。JSONLは1行1オブジェクトで、未知のフィールドは読み飛ばすが、ここに記載した必須フィールドは省略できない。
 
 ## Position JSONL
 
@@ -58,6 +58,25 @@ feature 30300 64 32
 
 必須フィールドは`hidden_units`、`hidden_bias`、`output_weights`、`output_bias`、`output_shift`。各フィールドは1回だけ指定し、`hidden_units`は`2`、hidden/output weightsは2個の符号付き整数、biasは1個の符号付き整数、`output_shift`は32未満の符号なし整数にする。`feature`は0個以上指定でき、各行は`feature <id> <hidden-weight-0> <hidden-weight-1>`の形式にする。
 
+## NNUE-FIXTURE 2 model
+
+`NNUE-FIXTURE 2`は、入力512ユニット、hidden 32ユニット、hidden 32ユニット、出力1ユニットの固定構成を使う。`input_weights`はFeature IDごとの512個の入力重みで、同じFeature IDは1回だけ指定する。
+
+```text
+NNUE-FIXTURE 2
+hidden_units 512 32 32
+output_shift 0
+input_weights 30300 <512 values>
+layer1_weights <32 * 512 values>
+layer1_bias <32 values>
+layer2_weights <32 * 32 values>
+layer2_bias <32 values>
+output_weights <32 values>
+output_bias 0
+```
+
+`layer1_weights`と`layer2_weights`は行優先で並べる。各hidden層の出力にはReLUを適用し、最後に`output_shift`ビット右シフトする。`output_shift`は32未満にする。
+
 ## Per-example score JSONL
 
 `score --output-file=<path>`が書くファイル。入力した各学習例について1行出力する。
@@ -68,4 +87,4 @@ feature 30300 64 32
 
 入力学習例のフィールドに、モデルが計算した整数`score`を追加した形式になる。
 
-`score`は`NnueScorer::score`が返す符号付き32ビット整数で、確率や百分率ではない。モデルの重みと`output_shift`によって値の大きさが決まり、固定された正規化範囲はない。現在の`NNUE-FIXTURE 1`モデルではhidden層のReLU後に出力を右シフトするため、負のhidden値だけからなる候補は`0`になる。したがって`0`は有効なスコアであり、未評価やエラーを意味しない。
+`score`は`NnueScorer::score`が返す符号付き32ビット整数で、確率や百分率ではない。モデルの重みと`output_shift`によって値の大きさが決まり、固定された正規化範囲はない。v1/v2ともhidden層のReLU後に出力を右シフトするため、負のhidden値だけからなる候補は`0`になる。したがって`0`は有効なスコアであり、未評価やエラーを意味しない。

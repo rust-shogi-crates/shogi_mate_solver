@@ -2,7 +2,7 @@ use std::{env, fs, process};
 
 use mate_solver::{
     features::{FeatureId, FeatureRole, candidate_features},
-    nnue::parse::parse_model,
+    nnue::parse::{DEEP_INPUTS, parse_deep_model, parse_model},
     position_wrapper::PositionWrapper,
 };
 use serde::{Deserialize, Serialize};
@@ -66,7 +66,9 @@ fn run() -> Result<(), String> {
     let output_path = output_path.ok_or("missing --output")?;
     let model_text =
         fs::read_to_string(&model_path).map_err(|error| format!("read {model_path}: {error}"))?;
-    let mut model = parse_model(&model_text)?;
+    let is_deep = model_text.lines().next() == Some("NNUE-FIXTURE 2");
+    let mut model = (!is_deep).then(|| parse_model(&model_text)).transpose()?;
+    let mut deep_model = is_deep.then(|| parse_deep_model(&model_text)).transpose()?;
     let mut example_count = 0usize;
 
     for line in fs::read_to_string(&examples_path)
@@ -94,16 +96,29 @@ fn run() -> Result<(), String> {
         let direction = if example.label == 1 { 1 } else { -1 };
         for FeatureId(feature) in candidate_features(&wrapped, mv, role) {
             if feature >= 30_000 {
-                let weights = model.feature_weights.entry(feature).or_default();
-                weights[0] += direction * HIDDEN_WEIGHT_SCALE;
-                weights[1] += direction * (HIDDEN_WEIGHT_SCALE / 2);
+                if let Some(model) = &mut model {
+                    let weights = model.feature_weights.entry(feature).or_default();
+                    weights[0] += direction * HIDDEN_WEIGHT_SCALE;
+                    weights[1] += direction * (HIDDEN_WEIGHT_SCALE / 2);
+                } else if let Some(model) = &mut deep_model {
+                    let weights = model
+                        .input_weights
+                        .entry(feature)
+                        .or_insert_with(|| vec![0; DEEP_INPUTS]);
+                    let bucket = feature as usize % DEEP_INPUTS;
+                    weights[bucket] += direction * HIDDEN_WEIGHT_SCALE;
+                }
             }
         }
         example_count += 1;
     }
 
-    fs::write(&output_path, model.to_text())
-        .map_err(|error| format!("write {output_path}: {error}"))
+    let output = match (model, deep_model) {
+        (Some(model), None) => model.to_text(),
+        (None, Some(model)) => model.to_text(),
+        _ => return Err("invalid model format".to_owned()),
+    };
+    fs::write(&output_path, output).map_err(|error| format!("write {output_path}: {error}"))
 }
 
 fn next_arg(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {

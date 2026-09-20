@@ -103,17 +103,19 @@ The remaining work starts from the merged NNUE runtime. PR 6 is the current impl
 - Suggested branch: `codex/issue-16-trained-model-rollout`.
 - Purpose: connect a real trained model to the solver in an evidence-driven way.
 - Implementation:
-  - [ ] Add or reference a real trained model.
+  - [ ] Add or reference a real trained model using the multi-layer format.
+  - [x] Extend runtime inference from the two-unit fixture to `512 -> 32 -> 32 -> 1`.
+  - [x] Extend model parsing and learning/export for the multi-layer format.
   - [x] Expose it through an explicit option first.
   - [ ] Document model provenance, training data, feature format version, and benchmark results.
   - [ ] Consider default enablement only after benchmark evidence supports it.
 - Functional test:
-  - Run the solver manually with and without the trained-model option on representative SFENs.
-  - Inspect answers, runtime summaries, and search summaries.
-  - Confirm failures are clear when the model artifact is unavailable or incompatible.
+  - [x] Run the solver manually with and without the trained-model option on representative SFENs.
+  - [x] Inspect answers, runtime summaries, and search summaries.
+  - [x] Confirm failures are clear when the model artifact is unavailable or incompatible.
 - Self review:
-  - Run full automated correctness tests.
-  - Compare release benchmarks against the previous default.
+  - [x] Run full automated correctness tests.
+  - [x] Compare release benchmarks against the previous default.
   - Measure release binary size if the model is embedded.
   - Keep default enablement evidence-driven; do not enable by default if search work or runtime does not improve.
 
