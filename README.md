@@ -73,11 +73,11 @@ cargo run --release -p benchmark_harness -- run --strict --move-ordering=nnue-fi
 cargo run --release -p nnue_training --bin generate -- --positions benchmark/issue16-ordering.jsonl --results /tmp/benchmark-results.jsonl --output /tmp/nnue-examples.jsonl --evaluator=eval --mirror --plies=2
 cargo run --release -p nnue_training --bin export -- --examples /tmp/nnue-examples.jsonl --output /tmp/nnue-model.nnue
 cargo run --release -p nnue_training --bin score -- --model /tmp/nnue-model.nnue --examples /tmp/nnue-examples.jsonl
-cargo run --release -p nnue_training --bin score -- --model /tmp/nnue-model.nnue --examples /tmp/nnue-examples.jsonl --per-example > /tmp/nnue-scores.jsonl
+cargo run --release -p nnue_training --bin score -- --model /tmp/nnue-model.nnue --examples /tmp/nnue-examples.jsonl --output-file /tmp/nnue-scores.jsonl
 ```
 
 export した `NNUE-FIXTURE 1` テキストモデルは `mate_solver::nnue::NnueScorer::from_model` で読み込む。学習用の依存関係は独立した `nnue_training` crate に分離してあり、solver のランタイム依存関係には含まれない。
 
 `--mirror` は SFEN と指し手を変換した左右対称の例を追加する。`--plies=N` は 0 手先から N 手先まで各位置を生成し、各位置で evaluator を再実行して新しい label を付け、元の ID、変換方法、進めた手数を記録する。偶数のオフセットでは攻め方、奇数のオフセットでは玉方の候補手を生成する。候補手ごとの探索はデフォルトで 60 秒の生成期限を共有し、`--timeout-ms=<ms>` で変更できる。期限に達した場合は完了済みの部分結果を書き出す。
 
-`score --per-example` は各学習例の `id`、局面、指し手、label、score、変換方法、ply offsetをJSONLで出力する。集計結果は標準エラー出力に出す。
+`score --output-file=<path>` は各学習例の `id`、局面、指し手、label、score、変換方法、ply offsetを指定したファイルへJSONLで出力する。未指定時は集計結果だけを標準出力に出す。

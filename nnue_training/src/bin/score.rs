@@ -45,7 +45,7 @@ fn run() -> Result<(), String> {
     let mut args = env::args().skip(1);
     let mut model_path = None;
     let mut examples_path = None;
-    let mut per_example = false;
+    let mut output_file = None;
 
     while let Some(arg) = args.next() {
         if let Some(value) = arg.strip_prefix("--model=") {
@@ -56,8 +56,10 @@ fn run() -> Result<(), String> {
             examples_path = Some(value.to_owned());
         } else if arg == "--examples" {
             examples_path = Some(next_arg(&mut args, "--examples")?);
-        } else if arg == "--per-example" {
-            per_example = true;
+        } else if let Some(value) = arg.strip_prefix("--output-file=") {
+            output_file = Some(value.to_owned());
+        } else if arg == "--output-file" {
+            output_file = Some(next_arg(&mut args, "--output-file")?);
         } else {
             return Err(format!("unknown argument: {arg}"));
         }
@@ -70,6 +72,7 @@ fn run() -> Result<(), String> {
     let scorer = NnueScorer::from_model(&model)?;
     let mut count = 0usize;
     let mut positive = 0usize;
+    let mut output = String::new();
     for line in fs::read_to_string(&examples_path)
         .map_err(|error| format!("read {examples_path}: {error}"))?
         .lines()
@@ -91,7 +94,7 @@ fn run() -> Result<(), String> {
             mv,
             role,
         ));
-        if per_example {
+        if output_file.is_some() {
             let record = ScoreRecord {
                 id: &example.id,
                 source_id: &example.source_id,
@@ -103,20 +106,19 @@ fn run() -> Result<(), String> {
                 transform: &example.transform,
                 ply_offset: example.ply_offset,
             };
-            println!(
-                "{}",
-                serde_json::to_string(&record)
-                    .map_err(|error| format!("serialize score: {error}"))?
+            output.push_str(
+                &serde_json::to_string(&record)
+                    .map_err(|error| format!("serialize score: {error}"))?,
             );
+            output.push('\n');
         }
         count += 1;
         positive += usize::from(score > 0);
     }
-    if per_example {
-        eprintln!("scored {count} examples; {positive} positive scores");
-    } else {
-        println!("scored {count} examples; {positive} positive scores");
+    if let Some(output_file) = output_file {
+        fs::write(&output_file, output).map_err(|error| format!("write {output_file}: {error}"))?;
     }
+    println!("scored {count} examples; {positive} positive scores");
     Ok(())
 }
 
