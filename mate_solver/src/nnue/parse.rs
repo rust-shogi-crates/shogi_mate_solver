@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 pub const DEEP_INPUTS: usize = 512;
 pub const DEEP_HIDDEN_1: usize = 32;
 pub const DEEP_HIDDEN_2: usize = 32;
+pub const DEFAULT_LOGIT_SCALE: u32 = 127;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeepModel {
@@ -14,6 +15,7 @@ pub struct DeepModel {
     pub output_weights: Vec<i32>,
     pub output_bias: i32,
     pub output_shift: u32,
+    pub logit_scale: u32,
 }
 
 impl DeepModel {
@@ -35,12 +37,14 @@ impl DeepModel {
             output_weights: vec![1; DEEP_HIDDEN_2],
             output_bias: 0,
             output_shift: 0,
+            logit_scale: DEFAULT_LOGIT_SCALE,
         }
     }
 
     pub fn to_text(&self) -> String {
         let mut text = String::from("NNUE-FIXTURE 1\nhidden_units 512 32 32\n");
         text.push_str(&format!("output_shift {}\n", self.output_shift));
+        text.push_str(&format!("logit_scale {}\n", self.logit_scale));
         for (&feature, weights) in &self.input_weights {
             text.push_str(&format!("input_weights {feature}"));
             for weight in weights {
@@ -66,6 +70,7 @@ pub fn parse_deep_model(text: &str) -> Result<DeepModel, String> {
     }
     let mut seen_units = false;
     let mut seen_shift = false;
+    let mut seen_logit_scale = false;
     let mut seen_layer1 = false;
     let mut seen_layer1_bias = false;
     let mut seen_layer2 = false;
@@ -91,6 +96,16 @@ pub fn parse_deep_model(text: &str) -> Result<DeepModel, String> {
                     return Err("output_shift must be less than 32".to_owned());
                 }
                 seen_shift = true;
+            }
+            Some("logit_scale") => {
+                if seen_logit_scale {
+                    return Err("duplicate logit_scale".to_owned());
+                }
+                model.logit_scale = parse_unsigned(&mut fields, "logit_scale")?;
+                if model.logit_scale == 0 {
+                    return Err("logit_scale must be positive".to_owned());
+                }
+                seen_logit_scale = true;
             }
             Some("input_weights") => {
                 let feature = parse_feature(&mut fields)?;
@@ -149,6 +164,7 @@ pub fn parse_deep_model(text: &str) -> Result<DeepModel, String> {
     }
     if !seen_units
         || !seen_shift
+        || !seen_logit_scale
         || !seen_layer1
         || !seen_layer1_bias
         || !seen_layer2

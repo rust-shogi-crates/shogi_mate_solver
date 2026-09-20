@@ -118,6 +118,7 @@ fn run() -> Result<(), String> {
 }
 
 fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)], epochs: usize) {
+    let logit_scale = f64::from(model.logit_scale);
     let mut input_weights = model
         .input_weights
         .iter()
@@ -199,7 +200,7 @@ fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)], epochs:
                     .zip(&output_weights)
                     .map(|(value, weight)| value * weight)
                     .sum::<f64>();
-            let prediction = sigmoid(output);
+            let prediction = sigmoid(output / logit_scale);
             let class_weight = if *label > 0.5 {
                 POSITIVE_LABEL_WEIGHT
             } else {
@@ -208,7 +209,7 @@ fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)], epochs:
             epoch_loss += class_weight
                 * (-label * prediction.max(f64::MIN_POSITIVE).ln()
                     - (1.0 - label) * (1.0 - prediction).max(f64::MIN_POSITIVE).ln());
-            let delta_output = (prediction - label) * class_weight;
+            let delta_output = (prediction - label) * class_weight / logit_scale;
 
             let output_weights_before = output_weights.clone();
             for (weight, value) in output_weights.iter_mut().zip(&a2) {

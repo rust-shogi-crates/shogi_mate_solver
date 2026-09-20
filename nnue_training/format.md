@@ -50,6 +50,7 @@
 NNUE-FIXTURE 1
 hidden_units 512 32 32
 output_shift 0
+logit_scale 127
 input_weights 30300 <512 values>
 layer1_weights <32 * 512 values>
 layer1_bias <32 values>
@@ -59,7 +60,7 @@ output_weights <32 values>
 output_bias 0
 ```
 
-`layer1_weights`と`layer2_weights`は行優先で並べる。各hidden層の出力にはReLUを適用し、最後に`output_shift`ビット右シフトする。`output_shift`は32未満にする。
+`layer1_weights`と`layer2_weights`は行優先で並べる。各hidden層の出力にはReLUを適用し、最後に`output_shift`ビット右シフトする。`output_shift`は32未満、`logit_scale`は正の整数にする。確率を求めるときは`sigmoid(score / logit_scale)`を使う。
 
 ## Per-example score JSONL
 
@@ -71,4 +72,4 @@ output_bias 0
 
 入力学習例のフィールドに、モデルが計算した整数`score`と`probability`を追加した形式になる。
 
-`score`は`NnueScorer::score`が返すrawな符号付き32ビット整数で、確率ではない。モデルの重みと`output_shift`によって値の大きさが決まり、固定された正規化範囲はない。`probability`は`sigmoid(score) * 1_000_000`を丸めた値で、範囲は`0..=1_000_000`。学習時の目的関数に対応する確率的な指標だが、データ量やクラス重みの影響を受けるため、校正済みの確率ではない。hidden層のReLU後に出力を右シフトするため、負のhidden値だけからなる候補の`score`は`0`になる。`0`は有効なスコアであり、未評価やエラーを意味しない。
+`score`は`NnueScorer::score`が返すrawな符号付き32ビット整数で、確率ではない。モデルの重みと`output_shift`によって値の大きさが決まり、固定された正規化範囲はない。`probability`は`sigmoid(score / logit_scale) * 1_000_000`を丸めた値で、範囲は`0..=1_000_000`。`logit_scale`の初期値は127。学習時の目的関数に対応する確率的な指標だが、データ量やクラス重みの影響を受けるため、校正済みの確率ではない。hidden層のReLU後に出力を右シフトするため、負のhidden値だけからなる候補の`score`は`0`になる。`0`は有効なスコアであり、未評価やエラーを意味しない。

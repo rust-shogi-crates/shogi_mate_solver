@@ -93,11 +93,15 @@ impl NnueScorer {
 
     /// Returns sigmoid(score) scaled to the integer range 0..=1_000_000.
     pub fn probability(&self, features: &[FeatureId]) -> u32 {
-        let score = f64::from(self.score(features));
-        let probability = if score >= 0.0 {
-            1.0 / (1.0 + (-score).exp())
+        let logit_scale = self
+            .deep_model
+            .as_ref()
+            .map_or(parse::DEFAULT_LOGIT_SCALE, |model| model.logit_scale);
+        let logit = f64::from(self.score(features)) / f64::from(logit_scale);
+        let probability = if logit >= 0.0 {
+            1.0 / (1.0 + (-logit).exp())
         } else {
-            let exp = score.exp();
+            let exp = logit.exp();
             exp / (1.0 + exp)
         };
         (probability * f64::from(PROBABILITY_SCALE)).round() as u32
