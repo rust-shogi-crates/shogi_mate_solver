@@ -1,6 +1,6 @@
 # nnue_training file formats
 
-`nnue_training`はJSONLと`NNUE-FIXTURE 1`または`NNUE-FIXTURE 2`テキストモデルを読む。JSONLは1行1オブジェクトで、未知のフィールドは読み飛ばすが、ここに記載した必須フィールドは省略できない。
+`nnue_training`はJSONLと`NNUE-FIXTURE 1`テキストモデルを読む。JSONLは1行1オブジェクトで、未知のフィールドは読み飛ばすが、ここに記載した必須フィールドは省略できない。
 
 ## Position JSONL
 
@@ -42,28 +42,12 @@
 - `transform`: `"identity"`、`"mirror"`、`"replay"`、`"replay+mirror"`のいずれか。
 - `ply_offset`: 元局面から進めた手数。0は元局面。
 
-## NNUE-FIXTURE model
+## NNUE-FIXTURE 1 model
 
-`init`と`learn`が書き、`mate_solver::nnue::NnueScorer::from_model`と`score`が読むテキスト形式。`learn`は入力モデルを初期値として使い、学習後のモデルを出力する。
+`init`と`learn`が書き、`mate_solver::nnue::NnueScorer::from_model`と`score`が読むテキスト形式。入力512ユニット、hidden 32ユニット、hidden 32ユニット、出力1ユニットの固定構成を使う。`input_weights`はFeature IDごとの512個の入力重みで、同じFeature IDは1回だけ指定する。`learn`はこの全結合層を逆伝播で更新する。
 
 ```text
 NNUE-FIXTURE 1
-hidden_units 2
-hidden_bias 0 0
-output_weights 2 1
-output_bias 0
-output_shift 7
-feature 30300 64 32
-```
-
-必須フィールドは`hidden_units`、`hidden_bias`、`output_weights`、`output_bias`、`output_shift`。各フィールドは1回だけ指定し、`hidden_units`は`2`、hidden/output weightsは2個の符号付き整数、biasは1個の符号付き整数、`output_shift`は32未満の符号なし整数にする。`feature`は0個以上指定でき、各行は`feature <id> <hidden-weight-0> <hidden-weight-1>`の形式にする。
-
-## NNUE-FIXTURE 2 model
-
-`NNUE-FIXTURE 2`は、入力512ユニット、hidden 32ユニット、hidden 32ユニット、出力1ユニットの固定構成を使う。`input_weights`はFeature IDごとの512個の入力重みで、同じFeature IDは1回だけ指定する。`learn`はこの全結合層を逆伝播で更新する。
-
-```text
-NNUE-FIXTURE 2
 hidden_units 512 32 32
 output_shift 0
 input_weights 30300 <512 values>
@@ -87,4 +71,4 @@ output_bias 0
 
 入力学習例のフィールドに、モデルが計算した整数`score`を追加した形式になる。
 
-`score`は`NnueScorer::score`が返す符号付き32ビット整数で、確率や百分率ではない。モデルの重みと`output_shift`によって値の大きさが決まり、固定された正規化範囲はない。v1/v2ともhidden層のReLU後に出力を右シフトするため、負のhidden値だけからなる候補は`0`になる。したがって`0`は有効なスコアであり、未評価やエラーを意味しない。
+`score`は`NnueScorer::score`が返す符号付き32ビット整数で、確率や百分率ではない。モデルの重みと`output_shift`によって値の大きさが決まり、固定された正規化範囲はない。hidden層のReLU後に出力を右シフトするため、負のhidden値だけからなる候補は`0`になる。したがって`0`は有効なスコアであり、未評価やエラーを意味しない。

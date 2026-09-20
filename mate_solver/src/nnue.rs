@@ -59,22 +59,10 @@ impl NnueScorer {
 
     /// Loads the versioned text format emitted by `nnue_training learn`.
     pub fn from_model(text: &str) -> Result<Self, String> {
-        if text.lines().next() == Some("NNUE-FIXTURE 2") {
-            return Ok(Self {
-                deep_model: Some(parse::parse_deep_model(text)?),
-                ..Self::empty()
-            });
-        }
-        let model = parse::parse_model(text)?;
-        let mut scorer = Self::empty();
-        scorer.hidden_bias = model.hidden_bias;
-        scorer.output_weights = model.output_weights;
-        scorer.output_bias = model.output_bias;
-        scorer.output_shift = model.output_shift;
-        for (feature, weights) in model.feature_weights {
-            scorer.add_feature(FeatureId(feature), weights);
-        }
-        Ok(scorer)
+        Ok(Self {
+            deep_model: Some(parse::parse_deep_model(text)?),
+            ..Self::empty()
+        })
     }
 
     pub fn score(&self, features: &[FeatureId]) -> i32 {
@@ -181,15 +169,15 @@ mod tests {
 
     #[test]
     fn learned_model_round_trips_into_runtime() {
-        let model = "NNUE-FIXTURE 1\nhidden_units 2\nhidden_bias 0 0\noutput_weights 2 1\noutput_bias 0\noutput_shift 7\nfeature 30300 64 32\n";
-        let scorer = NnueScorer::from_model(model).unwrap();
+        let model = parse::DeepModel::empty().to_text();
+        let scorer = NnueScorer::from_model(&model).unwrap();
 
-        assert_eq!(scorer.score(&[FeatureId(30_300)]), 1);
+        assert_eq!(scorer.score(&[FeatureId(30_300)]), 64);
     }
 
     #[test]
     fn model_requires_all_runtime_fields() {
-        let model = "NNUE-FIXTURE 1\nhidden_units 2\n";
+        let model = "NNUE-FIXTURE 1\nhidden_units 512 32 32\n";
 
         assert_eq!(
             NnueScorer::from_model(model),
@@ -199,10 +187,11 @@ mod tests {
 
     #[test]
     fn model_rejects_unsafe_output_shift() {
-        let model = "NNUE-FIXTURE 1\nhidden_units 2\nhidden_bias 0 0\noutput_weights 2 1\noutput_bias 0\noutput_shift 32\n";
+        let mut model = parse::DeepModel::empty().to_text();
+        model = model.replace("output_shift 0", "output_shift 32");
 
         assert_eq!(
-            NnueScorer::from_model(model),
+            NnueScorer::from_model(&model),
             Err("output_shift must be less than 32".to_owned())
         );
     }

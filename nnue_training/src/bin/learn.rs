@@ -1,22 +1,18 @@
 use std::{env, fs, process};
 
 use mate_solver::{
-    features::{FeatureId, FeatureRole, candidate_features},
-    nnue::parse::{
-        DEEP_HIDDEN_1, DEEP_HIDDEN_2, DEEP_INPUTS, DeepModel, parse_deep_model, parse_model,
-    },
+    features::{FeatureRole, candidate_features},
+    nnue::parse::{DEEP_HIDDEN_1, DEEP_HIDDEN_2, DEEP_INPUTS, DeepModel, parse_deep_model},
     position_wrapper::PositionWrapper,
 };
 use serde::{Deserialize, Serialize};
 use shogi_core::{Move, PartialPosition};
 use shogi_usi_parser::FromUsi;
 
-const HIDDEN_WEIGHT_SCALE: i32 = 64;
 const INPUT_LEARNING_RATE: f64 = 1.0;
 const HIDDEN_LEARNING_RATE: f64 = 0.01;
 const OUTPUT_LEARNING_RATE: f64 = 0.001;
 const POSITIVE_LABEL_WEIGHT: f64 = 1_000.0;
-const EPOCHS: usize = 10;
 
 #[derive(Serialize, Deserialize)]
 struct TrainingExample {
@@ -43,6 +39,7 @@ fn run() -> Result<(), String> {
     let mut examples_path = None;
     let mut output_path = None;
     let mut limit = None;
+    let mut epochs = None;
 
     while let Some(arg) = args.next() {
         if let Some(value) = arg.strip_prefix("--model=") {
@@ -63,6 +60,13 @@ fn run() -> Result<(), String> {
                     .parse::<usize>()
                     .map_err(|error| format!("invalid --limit: {error}"))?,
             );
+        } else if let Some(value) = arg.strip_prefix("--epochs=") {
+            epochs = Some(parse_positive(value, "--epochs")?);
+        } else if arg == "--epochs" {
+            epochs = Some(parse_positive(
+                &next_arg(&mut args, "--epochs")?,
+                "--epochs",
+            )?);
         } else {
             return Err(format!("unknown argument: {arg}"));
         }
@@ -73,9 +77,8 @@ fn run() -> Result<(), String> {
     let output_path = output_path.ok_or("missing --output")?;
     let model_text =
         fs::read_to_string(&model_path).map_err(|error| format!("read {model_path}: {error}"))?;
-    let is_deep = model_text.lines().next() == Some("NNUE-FIXTURE 2");
-    let mut model = (!is_deep).then(|| parse_model(&model_text)).transpose()?;
-    let mut deep_model = is_deep.then(|| parse_deep_model(&model_text)).transpose()?;
+    let mut model = parse_deep_model(&model_text)?;
+    let epochs = epochs.unwrap_or(10);
     let mut deep_examples = Vec::new();
     let mut example_count = 0usize;
 
@@ -102,37 +105,19 @@ fn run() -> Result<(), String> {
             other => return Err(format!("unknown role: {other}")),
         };
         let features = candidate_features(&wrapped, mv, role);
-        if deep_model.is_some() {
-            deep_examples.push((
-                features.into_iter().map(|feature| feature.0).collect(),
-                f64::from(example.label),
-            ));
-        } else {
-            let direction = if example.label == 1 { 1 } else { -1 };
-            for FeatureId(feature) in features {
-                if feature >= 30_000 {
-                    let model = model.as_mut().ok_or("invalid model format")?;
-                    let weights = model.feature_weights.entry(feature).or_default();
-                    weights[0] += direction * HIDDEN_WEIGHT_SCALE;
-                    weights[1] += direction * (HIDDEN_WEIGHT_SCALE / 2);
-                }
-            }
-        }
+        deep_examples.push((
+            features.into_iter().map(|feature| feature.0).collect(),
+            f64::from(example.label),
+        ));
         example_count += 1;
     }
 
-    if let Some(model) = &mut deep_model {
-        train_deep_model(model, &deep_examples);
-    }
-    let output = match (model, deep_model) {
-        (Some(model), None) => model.to_text(),
-        (None, Some(model)) => model.to_text(),
-        _ => return Err("invalid model format".to_owned()),
-    };
-    fs::write(&output_path, output).map_err(|error| format!("write {output_path}: {error}"))
+    train_deep_model(&mut model, &deep_examples, epochs);
+    fs::write(&output_path, model.to_text())
+        .map_err(|error| format!("write {output_path}: {error}"))
 }
 
-fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)]) {
+fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)], epochs: usize) {
     let mut input_weights = model
         .input_weights
         .iter()
@@ -182,7 +167,8 @@ fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)]) {
         .collect::<Vec<_>>();
     let mut output_bias = f64::from(model.output_bias);
 
-    for _ in 0..EPOCHS {
+    for epoch in 1..=epochs {
+        let mut epoch_loss = 0.0;
         for (features, label) in examples {
             let mut input = vec![0.0; DEEP_INPUTS];
             for &feature in features {
@@ -214,12 +200,15 @@ fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)]) {
                     .map(|(value, weight)| value * weight)
                     .sum::<f64>();
             let prediction = sigmoid(output);
-            let delta_output = (prediction - label)
-                * if *label > 0.5 {
-                    POSITIVE_LABEL_WEIGHT
-                } else {
-                    1.0
-                };
+            let class_weight = if *label > 0.5 {
+                POSITIVE_LABEL_WEIGHT
+            } else {
+                1.0
+            };
+            epoch_loss += class_weight
+                * (-label * prediction.max(f64::MIN_POSITIVE).ln()
+                    - (1.0 - label) * (1.0 - prediction).max(f64::MIN_POSITIVE).ln());
+            let delta_output = (prediction - label) * class_weight;
 
             let output_weights_before = output_weights.clone();
             for (weight, value) in output_weights.iter_mut().zip(&a2) {
@@ -273,6 +262,12 @@ fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)]) {
                 }
             }
         }
+        let mean_loss = if examples.is_empty() {
+            0.0
+        } else {
+            epoch_loss / examples.len() as f64
+        };
+        println!("epoch {epoch}/{epochs}: loss={mean_loss:.6}");
     }
 
     model.input_weights = input_weights
@@ -328,6 +323,16 @@ fn next_arg(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<Strin
         .ok_or_else(|| format!("missing value for {flag}"))
 }
 
+fn parse_positive(value: &str, flag: &str) -> Result<usize, String> {
+    let value = value
+        .parse::<usize>()
+        .map_err(|error| format!("invalid {flag}: {error}"))?;
+    if value == 0 {
+        return Err(format!("{flag} must be positive"));
+    }
+    Ok(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,7 +341,11 @@ mod tests {
     #[test]
     fn backpropagation_learns_a_separable_fixture() {
         let mut model = DeepModel::empty();
-        train_deep_model(&mut model, &[([100].to_vec(), 1.0), ([200].to_vec(), 0.0)]);
+        train_deep_model(
+            &mut model,
+            &[([100].to_vec(), 1.0), ([200].to_vec(), 0.0)],
+            10,
+        );
         let scorer = NnueScorer::from_model(&model.to_text()).unwrap();
         assert_ne!(
             scorer.score(&[FeatureId(100)]),
