@@ -43,6 +43,10 @@ impl SearchCtx {
     pub fn config(&self) -> SearchConfig {
         self.config
     }
+
+    fn check_limits(&self, positions_inspected: u64) -> bool {
+        self.config.limit_reached(positions_inspected)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -50,15 +54,6 @@ impl SearchCtx {
 pub struct SearchStats {
     pub positions_inspected: u64,
     pub limit_reached: bool,
-}
-
-impl SearchStats {
-    fn check_limits(&mut self, config: SearchConfig) -> bool {
-        if config.limit_reached(self.positions_inspected) {
-            self.limit_reached = true;
-        }
-        self.limit_reached
-    }
 }
 
 impl SearchCtx {
@@ -217,7 +212,8 @@ pub fn mid_with_options_and_stats(
     stats: &mut SearchStats,
     move_ordering: &MoveOrderingOptions,
 ) -> (u32, u32) {
-    if stats.check_limits(ctx.config()) {
+    if ctx.check_limits(stats.positions_inspected) {
+        stats.limit_reached = true;
         return (u32::MAX - 1, u32::MAX - 1);
     }
     stats.positions_inspected += 1;
@@ -276,7 +272,8 @@ pub fn mid_with_options_and_stats(
 
     // 4. 多重反復深化
     loop {
-        if stats.check_limits(ctx.config()) {
+        if ctx.check_limits(stats.positions_inspected) {
+            stats.limit_reached = true;
             return (u32::MAX - 1, u32::MAX - 1);
         }
         let phi_sum = phi_sum(dfpn_tbl, &children);

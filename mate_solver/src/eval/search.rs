@@ -29,6 +29,10 @@ impl SearchCtx {
     pub fn config(&self) -> SearchConfig {
         self.config
     }
+
+    fn check_limits(&self, positions_inspected: u64) -> bool {
+        self.config.limit_reached(positions_inspected)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -36,15 +40,6 @@ impl SearchCtx {
 pub struct SearchStats {
     pub positions_inspected: u64,
     pub limit_reached: bool,
-}
-
-impl SearchStats {
-    fn check_limits(&mut self, config: SearchConfig) -> bool {
-        if config.limit_reached(self.positions_inspected) {
-            self.limit_reached = true;
-        }
-        self.limit_reached
-    }
 }
 
 impl SearchCtx {
@@ -248,7 +243,8 @@ pub fn alpha_beta_me_with_options_and_stats(
     df_pn_stats: &mut crate::df_pn::search::SearchStats,
     move_ordering: &MoveOrderingOptions,
 ) -> (Value, Option<Move>) {
-    if stats.check_limits(ctx.config()) {
+    if ctx.check_limits(stats.positions_inspected) {
+        stats.limit_reached = true;
         return (Value::INF, None);
     }
     stats.positions_inspected += 1;
@@ -317,7 +313,8 @@ pub fn alpha_beta_me_with_options_and_stats(
 
     let mut best = None;
     for mv in all {
-        if stats.check_limits(ctx.config()) {
+        if ctx.check_limits(stats.positions_inspected) {
+            stats.limit_reached = true;
             return (Value::INF, None);
         }
         let new_alpha = one_less(alpha);
@@ -469,7 +466,8 @@ pub fn alpha_beta_you_with_options_and_stats(
     df_pn_stats: &mut crate::df_pn::search::SearchStats,
     move_ordering: &MoveOrderingOptions,
 ) -> (Value, Option<Move>) {
-    if stats.check_limits(ctx.config()) {
+    if ctx.check_limits(stats.positions_inspected) {
+        stats.limit_reached = true;
         return (Value::INF, None);
     }
     stats.positions_inspected += 1;
@@ -531,7 +529,8 @@ pub fn alpha_beta_you_with_options_and_stats(
 
     let mut best = None;
     for &mv in &all {
-        if stats.check_limits(ctx.config()) {
+        if ctx.check_limits(stats.positions_inspected) {
+            stats.limit_reached = true;
             return (Value::INF, None);
         }
         let new_alpha = one_less(alpha);
