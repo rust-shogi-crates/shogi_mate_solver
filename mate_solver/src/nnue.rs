@@ -30,12 +30,12 @@ pub struct NnueScorer {
 impl Default for NnueScorer {
     fn default() -> Self {
         let mut scorer = Self::empty();
-        // The fixture intentionally gives promoted moves a positive signal.
-        scorer.add_feature(FeatureId(30_300), [64, 32]);
+        // The fixture intentionally gives a stable child-position feature a positive signal.
+        scorer.add_feature(FeatureId(10_691), [64, 32]);
         scorer.add_feature(FeatureId(0), [128, -128]);
         scorer.add_feature(FeatureId(1), [-128, 128]);
-        // FeatureId(30_001) is DROP_MOVE_KIND; the fixture favors drops.
-        scorer.add_feature(FeatureId(30_001), [64, 32]);
+        // FeatureId(20_061) is a stable hand-count feature used by the fixture.
+        scorer.add_feature(FeatureId(20_061), [64, 32]);
         scorer
     }
 }
@@ -165,23 +165,23 @@ mod tests {
     #[test]
     fn fixture_inference_is_deterministic() {
         let scorer = NnueScorer::default();
-        let features = [FeatureId(0), FeatureId(30_300)];
+        let features = [FeatureId(0), FeatureId(10_691)];
 
         assert_eq!(scorer.score(&features), scorer.score(&features));
     }
 
     #[test]
-    fn fixture_inference_rewards_promotion_feature() {
+    fn fixture_inference_rewards_child_position_feature() {
         let scorer = NnueScorer::default();
 
-        assert!(scorer.score(&[FeatureId(30_300)]) > scorer.score(&[]));
+        assert!(scorer.score(&[FeatureId(10_691)]) > scorer.score(&[]));
     }
 
     #[test]
-    fn fixture_inference_rewards_drop_feature() {
+    fn fixture_inference_rewards_hand_feature() {
         let scorer = NnueScorer::default();
 
-        assert!(scorer.score(&[FeatureId(30_001)]) > scorer.score(&[]));
+        assert!(scorer.score(&[FeatureId(20_061)]) > scorer.score(&[]));
     }
 
     #[test]
@@ -189,7 +189,7 @@ mod tests {
         let model = parse::DeepModel::empty().to_text();
         let scorer = NnueScorer::from_model(&model).unwrap();
 
-        assert_eq!(scorer.score(&[FeatureId(30_300)]), 64);
+        assert_eq!(scorer.score(&[FeatureId(10_691)]), 64);
     }
 
     #[test]
@@ -225,8 +225,8 @@ mod tests {
         let scorer = NnueScorer::default();
 
         assert_eq!(scorer.probability(&[]), 500_000);
-        assert!(scorer.probability(&[FeatureId(30_300)]) > scorer.probability(&[]));
-        assert!(scorer.probability(&[FeatureId(30_300)]) <= PROBABILITY_SCALE);
+        assert!(scorer.probability(&[FeatureId(10_691)]) > scorer.probability(&[]));
+        assert!(scorer.probability(&[FeatureId(10_691)]) <= PROBABILITY_SCALE);
     }
 
     #[test]
@@ -234,9 +234,9 @@ mod tests {
         let mut model = parse::DeepModel::empty();
         model
             .input_weights
-            .insert(30_300, vec![1; parse::DEEP_INPUTS]);
+            .insert(10_691, vec![1; parse::DEEP_INPUTS]);
         let scorer = NnueScorer::from_model(&model.to_text()).unwrap();
 
-        assert!(scorer.score(&[FeatureId(30_300)]) > scorer.score(&[]));
+        assert!(scorer.score(&[FeatureId(10_691)]) > scorer.score(&[]));
     }
 }

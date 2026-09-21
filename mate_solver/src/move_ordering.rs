@@ -161,8 +161,12 @@ fn score_move(
     role: FeatureRole,
 ) -> i32 {
     let features = match mode {
-        MoveOrderingMode::NnueModel => child_position_features(position, mv, role),
-        _ => candidate_features(position, mv, role),
+        MoveOrderingMode::NnueFixture | MoveOrderingMode::NnueModel => {
+            child_position_features(position, mv, role)
+        }
+        MoveOrderingMode::Current | MoveOrderingMode::FixtureScore => {
+            candidate_features(position, mv, role)
+        }
     };
     scorer.score(&features)
 }
@@ -269,7 +273,7 @@ mod tests {
     #[test]
     fn nnue_fixture_score_breaks_ties_without_changing_primary_order() {
         let position = PositionWrapper::new(
-            PartialPosition::from_usi("sfen 9/9/9/9/9/9/9/9/9 b GS 1").unwrap(),
+            PartialPosition::from_usi("sfen 9/9/9/9/9/9/9/9/4P4 b GS 1").unwrap(),
         );
         let preferred = Move::Normal {
             from: Square::SQ_5I,
