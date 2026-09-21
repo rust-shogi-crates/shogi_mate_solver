@@ -44,7 +44,7 @@
 
 ## NNUE-FIXTURE 1 model
 
-`init`と`learn`が書き、`mate_solver::nnue::NnueScorer::from_model`と`score`が読むテキスト形式。入力512ユニット、hidden 32ユニット、hidden 32ユニット、出力1ユニットの固定構成を使う。`input_weights`はFeature IDごとの512個の入力重みで、同じFeature IDは1回だけ指定する。`learn`はこの全結合層を逆伝播で更新する。
+`init`と`learn`が書き、`mate_solver::nnue::NnueScorer::from_model`と`score`が読むテキスト形式。入力512ユニット、hidden 32ユニット、hidden 32ユニット、出力1ユニットの固定構成を使う。`input_weights`はFeature IDごとの512個の入力重みで、同じFeature IDは1回だけ指定する。`learn`は指し手適用後の子局面featuresを入力し、この全結合層を逆伝播で更新する。
 
 ```text
 NNUE-FIXTURE 1

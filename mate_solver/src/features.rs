@@ -129,6 +129,16 @@ pub fn candidate_features(
     features
 }
 
+pub fn child_position_features(
+    position: &PositionWrapper,
+    mv: Move,
+    role: FeatureRole,
+) -> Vec<FeatureId> {
+    let mut child = position.clone();
+    child.make_move(mv);
+    position_features(&child, role)
+}
+
 fn role_feature(role: FeatureRole) -> FeatureId {
     FeatureId(ROLE_BASE + role.index())
 }
@@ -311,5 +321,20 @@ mod tests {
         eprintln!("features for {}: {rendered}", mv.to_usi_owned());
         assert_eq!(mv.to_usi_owned(), "G*5b");
         assert_eq!(rendered, "0 10 7213 3175 20081 30001 30237 30404");
+    }
+
+    #[test]
+    fn child_position_features_do_not_include_move_features() {
+        let position = wrapped("4k4/9/9/9/9/9/9/9/4K4 b G 1");
+        let mv = Move::Drop {
+            piece: Piece::B_G,
+            to: Square::SQ_5B,
+        };
+
+        assert!(
+            child_position_features(&position, mv, FeatureRole::Attacker)
+                .iter()
+                .all(|feature| feature.0 < 30_000)
+        );
     }
 }

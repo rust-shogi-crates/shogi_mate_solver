@@ -1,7 +1,7 @@
 use shogi_core::Move;
 
 use crate::{
-    features::{candidate_features, FeatureId, FeatureRole},
+    features::{candidate_features, child_position_features, FeatureId, FeatureRole},
     nnue::NnueScorer,
     position_wrapper::PositionWrapper,
     tt::DfPnTable,
@@ -100,9 +100,7 @@ pub fn order_df_pn_moves(
         .enumerate()
         .map(|(index, mv)| {
             let primary = df_pn_primary_key(mv);
-            let score = options
-                .scorer
-                .score(&candidate_features(position, mv, role));
+            let score = score_move(options.mode, &options.scorer, position, mv, role);
             (primary, -score, index, mv)
         })
         .collect();
@@ -143,9 +141,7 @@ pub fn order_eval_moves_with_role(
                         .fetch(cp.zobrist_hash())
                         .map(|(_, delta)| delta)
                         .unwrap_or(1);
-                    let score = options
-                        .scorer
-                        .score(&candidate_features(position, mv, role));
+                    let score = score_move(options.mode, &options.scorer, position, mv, role);
                     (primary, -score, index, mv)
                 })
                 .collect();
@@ -155,6 +151,20 @@ pub fn order_eval_moves_with_role(
             }
         }
     }
+}
+
+fn score_move(
+    mode: MoveOrderingMode,
+    scorer: &MoveOrderingScorer,
+    position: &PositionWrapper,
+    mv: Move,
+    role: FeatureRole,
+) -> i32 {
+    let features = match mode {
+        MoveOrderingMode::NnueModel => child_position_features(position, mv, role),
+        _ => candidate_features(position, mv, role),
+    };
+    scorer.score(&features)
 }
 
 fn df_pn_primary_key(mv: Move) -> u8 {

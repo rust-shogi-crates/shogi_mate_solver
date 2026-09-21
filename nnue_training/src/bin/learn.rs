@@ -1,7 +1,7 @@
 use std::{env, fs, process};
 
 use mate_solver::{
-    features::{FeatureRole, candidate_features},
+    features::{FeatureRole, child_position_features},
     nnue::parse::{DEEP_HIDDEN_1, DEEP_HIDDEN_2, DEEP_INPUTS, DeepModel, parse_deep_model},
     position_wrapper::PositionWrapper,
 };
@@ -104,7 +104,7 @@ fn run() -> Result<(), String> {
             "defender" => FeatureRole::Defender,
             other => return Err(format!("unknown role: {other}")),
         };
-        let features = candidate_features(&wrapped, mv, role);
+        let features = child_position_features(&wrapped, mv, role);
         deep_examples.push((
             features.into_iter().map(|feature| feature.0).collect(),
             f64::from(example.label),

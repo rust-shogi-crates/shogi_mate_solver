@@ -1,7 +1,7 @@
 use std::{env, fs, process};
 
 use mate_solver::{
-    features::{FeatureRole, candidate_features},
+    features::{FeatureRole, child_position_features},
     nnue::NnueScorer,
     position_wrapper::PositionWrapper,
 };
@@ -90,7 +90,7 @@ fn run() -> Result<(), String> {
         };
         let mv = Move::from_usi(&example.move_usi)
             .map_err(|error| format!("invalid move for {}: {error:?}", example.id))?;
-        let features = candidate_features(&PositionWrapper::new(position), mv, role);
+        let features = child_position_features(&PositionWrapper::new(position), mv, role);
         let score = scorer.score(&features);
         let probability = scorer.probability(&features);
         if output_file.is_some() {
