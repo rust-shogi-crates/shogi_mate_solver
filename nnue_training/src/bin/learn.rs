@@ -1,12 +1,12 @@
 use std::{env, fs, process};
 
 use mate_solver::{
-    features::{FeatureRole, child_position_features},
+    features::{FeatureRole, position_features},
     nnue::parse::{DEEP_HIDDEN_1, DEEP_HIDDEN_2, DEEP_INPUTS, DeepModel, parse_deep_model},
     position_wrapper::PositionWrapper,
 };
 use serde::{Deserialize, Serialize};
-use shogi_core::{Move, PartialPosition};
+use shogi_core::PartialPosition;
 use shogi_usi_parser::FromUsi;
 
 const INPUT_LEARNING_RATE: f64 = 1.0;
@@ -20,7 +20,6 @@ struct TrainingExample {
     source_id: String,
     sfen: String,
     role: String,
-    move_usi: String,
     label: u8,
     transform: String,
     ply_offset: usize,
@@ -96,15 +95,12 @@ fn run() -> Result<(), String> {
             serde_json::from_str(line).map_err(|error| format!("parse example: {error}"))?;
         let position = PartialPosition::from_usi(&format!("sfen {}", example.sfen))
             .map_err(|error| format!("invalid SFEN for {}: {error:?}", example.id))?;
-        let wrapped = PositionWrapper::new(position);
-        let mv = Move::from_usi(&example.move_usi)
-            .map_err(|error| format!("invalid move for {}: {error:?}", example.id))?;
         let role = match example.role.as_str() {
             "attacker" => FeatureRole::Attacker,
             "defender" => FeatureRole::Defender,
             other => return Err(format!("unknown role: {other}")),
         };
-        let features = child_position_features(&wrapped, mv, role);
+        let features = position_features(&PositionWrapper::new(position), role);
         deep_examples.push((
             features.into_iter().map(|feature| feature.0).collect(),
             f64::from(example.label),

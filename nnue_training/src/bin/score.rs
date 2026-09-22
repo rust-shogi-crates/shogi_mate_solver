@@ -1,12 +1,12 @@
 use std::{env, fs, process};
 
 use mate_solver::{
-    features::{FeatureRole, child_position_features},
+    features::{FeatureRole, position_features},
     nnue::NnueScorer,
     position_wrapper::PositionWrapper,
 };
 use serde::{Deserialize, Serialize};
-use shogi_core::{Move, PartialPosition};
+use shogi_core::PartialPosition;
 use shogi_usi_parser::FromUsi;
 
 #[derive(Serialize, Deserialize)]
@@ -15,7 +15,6 @@ struct TrainingExample {
     source_id: String,
     sfen: String,
     role: String,
-    move_usi: String,
     label: u8,
     transform: String,
     ply_offset: usize,
@@ -27,7 +26,6 @@ struct ScoreRecord<'a> {
     source_id: &'a str,
     sfen: &'a str,
     role: &'a str,
-    move_usi: &'a str,
     label: u8,
     score: i32,
     probability: u32,
@@ -88,9 +86,7 @@ fn run() -> Result<(), String> {
             "defender" => FeatureRole::Defender,
             other => return Err(format!("unknown role: {other}")),
         };
-        let mv = Move::from_usi(&example.move_usi)
-            .map_err(|error| format!("invalid move for {}: {error:?}", example.id))?;
-        let features = child_position_features(&PositionWrapper::new(position), mv, role);
+        let features = position_features(&PositionWrapper::new(position), role);
         let score = scorer.score(&features);
         let probability = scorer.probability(&features);
         if output_file.is_some() {
@@ -99,7 +95,6 @@ fn run() -> Result<(), String> {
                 source_id: &example.source_id,
                 sfen: &example.sfen,
                 role: &example.role,
-                move_usi: &example.move_usi,
                 label: example.label,
                 score,
                 probability,

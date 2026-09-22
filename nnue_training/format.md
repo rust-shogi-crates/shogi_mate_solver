@@ -30,28 +30,27 @@
 `learn`と`score`が読む学習例ファイル。すべてのフィールドが必須。
 
 ```json
-{"id":"mate5::identity::ply0","source_id":"mate5","sfen":"3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1","role":"attacker","move_usi":"5c4b+","label":1,"transform":"identity","ply_offset":0}
+{"id":"mate5::identity::ply0","source_id":"mate5","sfen":"3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1","role":"attacker","label":1,"transform":"identity","ply_offset":0}
 ```
 
 - `id`: 学習例のID。
 - `source_id`: 元の局面のID。
-- `sfen`: 候補手を生成した局面のSFEN。
+- `sfen`: 評価対象の局面のSFEN。
 - `role`: `"attacker"`または`"defender"`。
-- `move_usi`: 候補手のUSI表記。
 - `label`: `0`または`1`。
 - `transform`: `"identity"`、`"mirror"`、`"replay"`、`"replay+mirror"`のいずれか。
 - `ply_offset`: 元局面から進めた手数。0は元局面。
 
 ## NNUE-FIXTURE 1 model
 
-`init`と`learn`が書き、`mate_solver::nnue::NnueScorer::from_model`と`score`が読むテキスト形式。入力512ユニット、hidden 32ユニット、hidden 32ユニット、出力1ユニットの固定構成を使う。`input_weights`はFeature IDごとの512個の入力重みで、同じFeature IDは1回だけ指定する。`learn`は指し手適用後の子局面featuresを入力し、この全結合層を逆伝播で更新する。
+`init`と`learn`が書き、`mate_solver::nnue::NnueScorer::from_model`と`score`が読むテキスト形式。入力512ユニット、hidden 32ユニット、hidden 32ユニット、出力1ユニットの固定構成を使う。`input_weights`はFeature IDごとの512個の入力重みで、同じFeature IDは1回だけ指定する。`learn`は学習例に記録された局面のposition featuresを入力し、この全結合層を逆伝播で更新する。
 
 ```text
 NNUE-FIXTURE 1
 hidden_units 512 32 32
 output_shift 0
 logit_scale 127
-input_weights 30300 <512 values>
+input_weights 10691 <512 values>
 layer1_weights <32 * 512 values>
 layer1_bias <32 values>
 layer2_weights <32 * 32 values>
@@ -67,7 +66,7 @@ output_bias 0
 `score --output-file=<path>`が書くファイル。入力した各学習例について1行出力する。
 
 ```json
-{"id":"mate5::identity::ply0","source_id":"mate5","sfen":"...","role":"attacker","move_usi":"5c4b+","label":1,"score":123,"probability":773000,"transform":"identity","ply_offset":0}
+{"id":"mate5::identity::ply0","source_id":"mate5","sfen":"...","role":"attacker","label":1,"score":123,"probability":773000,"transform":"identity","ply_offset":0}
 ```
 
 入力学習例のフィールドに、モデルが計算した整数`score`と`probability`を追加した形式になる。

@@ -81,7 +81,7 @@ The remaining work starts from the merged NNUE runtime. PR 6 is the current impl
 - Implementation:
   - [x] Add tooling to generate training examples.
   - [x] Add deterministic mirror/replay augmentation with source, transform, and ply metadata.
-  - [x] Define labels per candidate by whether its child position is proven to lead to mate under the selected evaluator; do not use the root-selected move as a proxy.
+  - [x] Define one mate/nomate label per generated position under the selected evaluator; do not include a candidate move in the training example.
   - [x] Add a configurable generation timeout that writes partial output instead of running indefinitely.
   - [x] Add learning tooling for the versioned runtime weight format.
   - [x] Require `learn` to take an initial model and add `init` for creating a placeholder model.
