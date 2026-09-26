@@ -50,6 +50,15 @@ impl SearchConfig {
         }
     }
 
+    pub fn remaining_positions(self, positions_inspected: u64) -> Self {
+        Self {
+            deadline: self.deadline,
+            max_positions: self
+                .max_positions
+                .map(|max_positions| max_positions.saturating_sub(positions_inspected)),
+        }
+    }
+
     pub(crate) fn limit_reached(self, positions_inspected: u64) -> bool {
         #[cfg(target_arch = "wasm32")]
         {

@@ -8,6 +8,7 @@ use std::{
 };
 
 use mate_solver::{
+    SearchConfig,
     df_pn::search as dfpnsearch,
     eval::{Value, search as evalsearch},
     features::FeatureRole,
@@ -160,7 +161,7 @@ fn run() -> Result<(), ()> {
 fn print_usage() {
     eprintln!("usage:");
     eprintln!(
-        "  benchmark_harness run [--strict] [--verbose] [--move-ordering=<mode>] [--revision=<label>] <positions.jsonl>..."
+        "  benchmark_harness run [--strict] [--verbose] [--max-positions=<n>] [--move-ordering=current|fixture|nnue-fixture|nnue-model] [--nnue-model=<path>] [--revision=<label>] <positions.jsonl>..."
     );
     eprintln!(
         "  benchmark_harness compare --base <base.jsonl> --current <current.jsonl> [--html <report.html>]"
@@ -171,7 +172,9 @@ fn run_benchmark(args: &[String]) -> Result<(), ()> {
     let mut revision = "current".to_owned();
     let mut strict = false;
     let mut verbose = false;
-    let mut move_ordering = MoveOrderingOptions::default();
+    let mut move_ordering_mode = "current".to_owned();
+    let mut nnue_model_path = None;
+    let mut max_positions = None;
     let mut inputs = Vec::new();
 
     for arg in args {
@@ -180,23 +183,19 @@ fn run_benchmark(args: &[String]) -> Result<(), ()> {
         } else if arg == "--verbose" {
             verbose = true;
         } else if let Some(mode) = arg.strip_prefix("--move-ordering=") {
-            move_ordering = match mode {
-                "current" => MoveOrderingOptions::default(),
-                "fixture" => MoveOrderingOptions {
-                    mode: MoveOrderingMode::FixtureScore,
-                    scorer: MoveOrderingScorer::Fixture(FixtureScorer::default()),
-                },
-                "nnue-fixture" => MoveOrderingOptions {
-                    mode: MoveOrderingMode::NnueFixture,
-                    scorer: MoveOrderingScorer::Nnue(NnueScorer::default()),
-                },
-                _ => {
-                    eprintln!("unknown move ordering mode: {mode}");
+            move_ordering_mode = mode.to_owned();
+        } else if let Some(path) = arg.strip_prefix("--nnue-model=") {
+            nnue_model_path = Some(path.to_owned());
+        } else if let Some(rest) = arg.strip_prefix("--revision=") {
+            revision = rest.to_owned();
+        } else if let Some(rest) = arg.strip_prefix("--max-positions=") {
+            max_positions = match rest.parse::<u64>() {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    eprintln!("invalid --max-positions: {error}");
                     return Err(());
                 }
             };
-        } else if let Some(rest) = arg.strip_prefix("--revision=") {
-            revision = rest.to_owned();
         } else {
             inputs.push(arg.clone());
         }
@@ -207,12 +206,56 @@ fn run_benchmark(args: &[String]) -> Result<(), ()> {
         return Err(());
     }
 
+    let move_ordering = match move_ordering_mode.as_str() {
+        "current" => MoveOrderingOptions::default(),
+        "fixture" => MoveOrderingOptions {
+            mode: MoveOrderingMode::FixtureScore,
+            scorer: MoveOrderingScorer::Fixture(FixtureScorer::default()),
+        },
+        "nnue-fixture" => MoveOrderingOptions {
+            mode: MoveOrderingMode::NnueFixture,
+            scorer: MoveOrderingScorer::Nnue(NnueScorer::default()),
+        },
+        "nnue-model" => {
+            let path = match nnue_model_path {
+                Some(path) => path,
+                None => {
+                    eprintln!("--nnue-model is required with --move-ordering=nnue-model");
+                    return Err(());
+                }
+            };
+            let text = match fs::read_to_string(&path) {
+                Ok(text) => text,
+                Err(error) => {
+                    eprintln!("read NNUE model {path}: {error}");
+                    return Err(());
+                }
+            };
+            let scorer = match NnueScorer::from_model(&text) {
+                Ok(scorer) => scorer,
+                Err(error) => {
+                    eprintln!("parse NNUE model {path}: {error}");
+                    return Err(());
+                }
+            };
+            MoveOrderingOptions {
+                mode: MoveOrderingMode::NnueModel,
+                scorer: MoveOrderingScorer::Nnue(scorer),
+            }
+        }
+        mode => {
+            eprintln!("unknown move ordering mode: {mode}");
+            return Err(());
+        }
+    };
+
     println!(
         "{}",
         json!({
             "type": "metadata",
             "mode": "run",
             "revision": revision,
+            "max_positions": max_positions,
         "inputs": &inputs,
         })
     );
@@ -248,7 +291,8 @@ fn run_benchmark(args: &[String]) -> Result<(), ()> {
                     continue;
                 }
             };
-            if let Err(message) = evaluate_position(&record, verbose, &move_ordering) {
+            if let Err(message) = evaluate_position(&record, verbose, &move_ordering, max_positions)
+            {
                 emit_error(&input, line_number, "evaluate", message, &raw_line);
                 failed = true;
             }
@@ -315,11 +359,12 @@ fn evaluate_position(
     record: &PositionRecord,
     verbose: bool,
     move_ordering: &MoveOrderingOptions,
+    max_positions: Option<u64>,
 ) -> Result<(), String> {
     let position = PartialPosition::from_usi(&format!("sfen {}", record.sfen))
         .map_err(|error| format!("invalid SFEN: {error:?}"))?;
-    evaluate_df_pn(record, &position, verbose, move_ordering);
-    evaluate_eval(record, &position, verbose, move_ordering);
+    evaluate_df_pn(record, &position, verbose, move_ordering, max_positions);
+    evaluate_eval(record, &position, verbose, move_ordering, max_positions);
     Ok(())
 }
 
@@ -328,6 +373,7 @@ fn evaluate_df_pn(
     position: &PartialPosition,
     verbose: bool,
     move_ordering: &MoveOrderingOptions,
+    max_positions: Option<u64>,
 ) {
     let mut df_pn = DfPnTable::new(TABLE_SIZE);
     let mut stats = dfpnsearch::SearchStats::default();
@@ -335,20 +381,31 @@ fn evaluate_df_pn(
     let ordered_root_moves = ordered_df_pn_root_moves(&wrapped, move_ordering);
     let root_candidate_moves = ordered_root_moves.len() as u64;
     let started = Instant::now();
-    let (proof_number, disproof_number) = dfpnsearch::df_pn_with_options_and_stats(
+    let config = max_positions.map_or_else(SearchConfig::default, SearchConfig::with_max_positions);
+    let (proof_number, disproof_number) = dfpnsearch::df_pn_with_config_and_options_and_stats(
         &mut df_pn,
         &wrapped,
         verbose,
         &mut stats,
         move_ordering,
+        config,
     );
     let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
-    let resolution = if (proof_number, disproof_number) == (u32::MAX, 0) {
-        Expected::NoMate
+    let resolution = if stats.limit_reached {
+        "limit_reached"
+    } else if (proof_number, disproof_number) == (u32::MAX, 0) {
+        "nomate"
     } else {
-        Expected::Mate
+        "mate"
     };
-    let ordering = if resolution == Expected::Mate {
+    let correct = if stats.limit_reached {
+        None
+    } else if resolution == "nomate" {
+        record.expected.map(|expected| expected == Expected::NoMate)
+    } else {
+        record.expected.map(|expected| expected == Expected::Mate)
+    };
+    let ordering = if resolution == "mate" {
         df_pn_root_ordering_result(&ordered_root_moves, &wrapped, &df_pn)
     } else {
         RootOrderingResult::default()
@@ -363,9 +420,10 @@ fn evaluate_df_pn(
             "evaluator": "df_pn",
             "elapsed_ms": elapsed_ms,
             "positions_inspected": stats.positions_inspected,
-            "resolution": resolution.as_str(),
+            "resolution": resolution,
             "expected": record.expected.map(Expected::as_str),
-            "correct": record.expected.map(|expected| expected == resolution),
+            "correct": correct,
+            "limit_reached": stats.limit_reached,
             "root_candidate_moves": root_candidate_moves,
             "root_chosen_move": ordering.chosen_move,
             "root_chosen_move_rank": ordering.chosen_move_rank,
@@ -381,23 +439,27 @@ fn evaluate_eval(
     position: &PartialPosition,
     verbose: bool,
     move_ordering: &MoveOrderingOptions,
+    max_positions: Option<u64>,
 ) {
     let mut df_pn = DfPnTable::new(TABLE_SIZE);
     let mut eval = EvalTable::new(TABLE_SIZE);
     let mut seed_stats = dfpnsearch::SearchStats::default();
     let mut eval_stats = evalsearch::SearchStats::default();
     let wrapped = PositionWrapper::new(position.clone());
-    dfpnsearch::df_pn_with_options_and_stats(
+    let config = max_positions.map_or_else(SearchConfig::default, SearchConfig::with_max_positions);
+    dfpnsearch::df_pn_with_config_and_options_and_stats(
         &mut df_pn,
         &wrapped,
         verbose,
         &mut seed_stats,
         move_ordering,
+        config,
     );
     let ordered_root_moves = ordered_eval_root_moves(&wrapped, &df_pn, move_ordering);
     let root_candidate_moves = ordered_root_moves.len() as u64;
     let mut df_pn_stats = dfpnsearch::SearchStats::default();
     let started = Instant::now();
+    let eval_config = config.remaining_positions(seed_stats.positions_inspected);
     let (value, best_move) = evalsearch::alpha_beta_me_with_options_and_stats(
         &wrapped,
         &mut df_pn,
@@ -405,24 +467,32 @@ fn evaluate_eval(
         Value::ZERO,
         Value::new(40, 0, 0),
         &mut BTreeSet::new(),
-        &mut Default::default(),
+        &mut evalsearch::SearchCtx::with_config(eval_config),
         verbose,
         &mut eval_stats,
         &mut df_pn_stats,
         move_ordering,
     );
     let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
-    let resolution = if value.is_mate() {
-        Expected::Mate
+    let limit_reached =
+        seed_stats.limit_reached || eval_stats.limit_reached || df_pn_stats.limit_reached;
+    let resolution = if limit_reached {
+        "limit_reached"
+    } else if value.is_mate() {
+        "mate"
     } else {
-        Expected::NoMate
+        "nomate"
     };
-    let correct = record.expected.map(|expected| {
-        expected == resolution
-            && record.expected_plies.is_none_or(|expected_plies| {
-                !value.is_mate() || value.plies() as u64 == expected_plies
-            })
-    });
+    let correct = if limit_reached {
+        None
+    } else {
+        record.expected.map(|expected| {
+            (expected == Expected::Mate) == value.is_mate()
+                && record.expected_plies.is_none_or(|expected_plies| {
+                    !value.is_mate() || value.plies() as u64 == expected_plies
+                })
+        })
+    };
     let chosen_move_rank = root_chosen_move_rank(&ordered_root_moves, best_move);
     println!(
         "{}",
@@ -433,17 +503,18 @@ fn evaluate_eval(
             "line": record.line,
             "evaluator": "eval",
             "elapsed_ms": elapsed_ms,
-            "positions_inspected": eval_stats.positions_inspected + df_pn_stats.positions_inspected,
-            "resolution": resolution.as_str(),
+            "positions_inspected": seed_stats.positions_inspected + eval_stats.positions_inspected + df_pn_stats.positions_inspected,
+            "resolution": resolution,
             "expected": record.expected.map(Expected::as_str),
             "expected_plies": record.expected_plies,
             "correct": correct,
+            "limit_reached": limit_reached,
             "root_candidate_moves": root_candidate_moves,
             "root_chosen_move": best_move.map(|mv| mv.to_usi_owned()),
             "root_chosen_move_rank": chosen_move_rank,
             "root_first_candidate_chosen": chosen_move_rank.map(|rank| rank == 0),
             "eval_positions_inspected": eval_stats.positions_inspected,
-            "df_pn_positions_inspected": df_pn_stats.positions_inspected,
+            "df_pn_positions_inspected": seed_stats.positions_inspected + df_pn_stats.positions_inspected,
             "value": value_json(value),
         })
     );

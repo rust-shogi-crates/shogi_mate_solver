@@ -1,7 +1,7 @@
 use shogi_core::Move;
 
 use crate::{
-    features::{candidate_features, FeatureId, FeatureRole},
+    features::{position_features, FeatureId, FeatureRole},
     nnue::NnueScorer,
     position_wrapper::PositionWrapper,
     tt::DfPnTable,
@@ -51,8 +51,8 @@ impl FixtureScorer {
 
 impl Default for FixtureScorer {
     fn default() -> Self {
-        // FeatureId(30_300) is MOVE_PROMOTE, so the fixture favors promotions.
-        Self::new(&[(FeatureId(30_300), 100)])
+        // FeatureId(10_691) is the preferred child-position feature in the fixture test.
+        Self::new(&[(FeatureId(10_691), 100)])
     }
 }
 
@@ -80,6 +80,7 @@ pub enum MoveOrderingMode {
     Current,
     FixtureScore,
     NnueFixture,
+    NnueModel,
 }
 
 pub fn order_df_pn_moves(
@@ -99,9 +100,7 @@ pub fn order_df_pn_moves(
         .enumerate()
         .map(|(index, mv)| {
             let primary = df_pn_primary_key(mv);
-            let score = options
-                .scorer
-                .score(&candidate_features(position, mv, role));
+            let score = score_move(&options.scorer, position, mv, role);
             (primary, -score, index, mv)
         })
         .collect();
@@ -128,7 +127,9 @@ pub fn order_eval_moves_with_role(
                 1
             }
         }),
-        MoveOrderingMode::FixtureScore | MoveOrderingMode::NnueFixture => {
+        MoveOrderingMode::FixtureScore
+        | MoveOrderingMode::NnueFixture
+        | MoveOrderingMode::NnueModel => {
             let mut ordered: Vec<_> = moves
                 .iter()
                 .copied()
@@ -140,9 +141,7 @@ pub fn order_eval_moves_with_role(
                         .fetch(cp.zobrist_hash())
                         .map(|(_, delta)| delta)
                         .unwrap_or(1);
-                    let score = options
-                        .scorer
-                        .score(&candidate_features(position, mv, role));
+                    let score = score_position(&options.scorer, &cp, role);
                     (primary, -score, index, mv)
                 })
                 .collect();
@@ -152,6 +151,25 @@ pub fn order_eval_moves_with_role(
             }
         }
     }
+}
+
+fn score_move(
+    scorer: &MoveOrderingScorer,
+    position: &PositionWrapper,
+    mv: Move,
+    role: FeatureRole,
+) -> i32 {
+    let mut child = position.clone();
+    child.make_move(mv);
+    score_position(scorer, &child, role)
+}
+
+fn score_position(
+    scorer: &MoveOrderingScorer,
+    position: &PositionWrapper,
+    role: FeatureRole,
+) -> i32 {
+    scorer.score(&position_features(position, role))
 }
 
 fn df_pn_primary_key(mv: Move) -> u8 {
@@ -230,7 +248,7 @@ mod tests {
     #[test]
     fn fixture_score_breaks_ties_without_changing_primary_order() {
         let position = PositionWrapper::new(
-            PartialPosition::from_usi("sfen 9/9/9/9/9/9/9/9/9 b GS 1").unwrap(),
+            PartialPosition::from_usi("sfen 9/9/9/9/9/9/9/9/4P4 b GS 1").unwrap(),
         );
         let preferred = Move::Normal {
             from: Square::SQ_5I,
@@ -256,7 +274,7 @@ mod tests {
     #[test]
     fn nnue_fixture_score_breaks_ties_without_changing_primary_order() {
         let position = PositionWrapper::new(
-            PartialPosition::from_usi("sfen 9/9/9/9/9/9/9/9/9 b GS 1").unwrap(),
+            PartialPosition::from_usi("sfen 9/9/9/9/9/9/9/9/4P4 b GS 1").unwrap(),
         );
         let preferred = Move::Normal {
             from: Square::SQ_5I,
