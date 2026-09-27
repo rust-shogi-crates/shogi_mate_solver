@@ -48,11 +48,36 @@ struct Opts {
 struct PositionStats {
     df_pn: u64,
     eval: u64,
+    df_pn_frontier: Vec<DfPnFrontierEntry>,
+}
+
+struct DfPnFrontierEntry {
+    depth: u8,
+    move_from_root: Option<Move>,
+    value: Option<(u32, u32)>,
 }
 
 impl PositionStats {
     fn total(&self) -> u64 {
         self.df_pn.saturating_add(self.eval)
+    }
+
+    fn capture_df_pn_frontier(&mut self, df_pn: &DfPnTable, root: &PositionWrapper) {
+        self.df_pn_frontier.clear();
+        self.df_pn_frontier.push(DfPnFrontierEntry {
+            depth: 0,
+            move_from_root: None,
+            value: df_pn.fetch(root.zobrist_hash()),
+        });
+        for mv in root.all_checks() {
+            let mut child = root.clone();
+            child.make_move(mv);
+            self.df_pn_frontier.push(DfPnFrontierEntry {
+                depth: 1,
+                move_from_root: Some(mv),
+                value: df_pn.fetch(child.zobrist_hash()),
+            });
+        }
     }
 }
 
@@ -201,7 +226,8 @@ fn find_mate_sequence(
 ) -> Result<Vec<Move>, String> {
     let mut turn = 0;
     let mut beta = opt.plies_added_unchecked(1);
-    let mut position = PositionWrapper::new(position.clone());
+    let root_position = PositionWrapper::new(position.clone());
+    let mut position = root_position.clone();
     let mut result = Vec::new();
     loop {
         let config = remaining_positions
@@ -243,6 +269,7 @@ fn find_mate_sequence(
         position_stats.eval += eval_stats.positions_inspected;
         position_stats.df_pn += dfpn_stats.positions_inspected;
         if eval_stats.limit_reached || dfpn_stats.limit_reached {
+            position_stats.capture_df_pn_frontier(df_pn, &root_position);
             return Err("search position limit reached while building mate sequence".to_owned());
         }
         if let Some(remaining) = remaining_positions {
@@ -284,6 +311,7 @@ fn solve_myself(
     );
     position_stats.df_pn += dfpn_stats.positions_inspected;
     if dfpn_stats.limit_reached {
+        position_stats.capture_df_pn_frontier(&df_pn, &PositionWrapper::new(position.clone()));
         return Err("search position limit reached during DF-PN".to_owned());
     }
     if let Some(remaining) = remaining_positions {
@@ -314,6 +342,7 @@ fn solve_myself(
     position_stats.eval += eval_stats.positions_inspected;
     position_stats.df_pn += eval_dfpn_stats.positions_inspected;
     if eval_stats.limit_reached || eval_dfpn_stats.limit_reached {
+        position_stats.capture_df_pn_frontier(&df_pn, &wrapped);
         return Err("search position limit reached during evaluation".to_owned());
     }
     if let Some(remaining) = remaining_positions {
@@ -374,6 +403,18 @@ fn main() {
             position_stats.df_pn,
             position_stats.eval
         );
+        for entry in &position_stats.df_pn_frontier {
+            let move_from_root = entry
+                .move_from_root
+                .map(|mv| mv.to_usi_owned())
+                .unwrap_or_else(|| "root".to_owned());
+            let (proof, disproof) = entry.value.unwrap_or((1, 1));
+            let cached = entry.value.is_some();
+            eprintln!(
+                "dfpn: depth={} move={} proof={} disproof={} cached={}",
+                entry.depth, move_from_root, proof, disproof, cached
+            );
+        }
     }
     let moves = match result {
         Ok(moves) => moves,
