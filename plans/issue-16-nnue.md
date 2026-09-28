@@ -111,7 +111,7 @@ The remaining work starts from the merged NNUE runtime. PR 6 is the current impl
   - [x] Define and apply an explicit logit scale so small raw scores do not saturate probability output.
   - [x] Evaluate post-move child positions with NNUE position features only.
   - [x] Add a `--max-positions` limit to normal solving and benchmark runs.
-  - [ ] Add incremental NNUE delta evaluation after child-position evaluation is correct.
+  - [x] Add incremental NNUE delta evaluation after child-position evaluation is correct.
   - [x] Expose it through an explicit option first.
   - [ ] Document model provenance, training data, feature format version, and benchmark results.
   - [ ] Consider default enablement only after benchmark evidence supports it.

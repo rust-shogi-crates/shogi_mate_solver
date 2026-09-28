@@ -6,7 +6,7 @@
 //! Hand counts use one count-bucket feature per color/piece kind, capped at
 //! bucket 19 for malformed positions with unusually large hands.
 
-use shogi_core::{Color, Hand, PieceKind, Square};
+use shogi_core::{Color, Hand, Move, PieceKind, Square};
 
 use crate::position_wrapper::PositionWrapper;
 
@@ -81,6 +81,94 @@ pub fn position_features(position: &PositionWrapper, role: FeatureRole) -> Vec<F
     features
 }
 
+/// Returns the feature IDs removed from and added to `position` by `mv`.
+///
+/// The relative king frame can change after every move because the side to
+/// move changes, so board features are compared square-by-square in O(81)
+/// rather than by searching two feature vectors against each other.
+pub fn position_feature_delta(
+    position: &PositionWrapper,
+    mv: Move,
+    role: FeatureRole,
+) -> (Vec<FeatureId>, Vec<FeatureId>) {
+    let mut child = position.clone();
+    child.make_move(mv);
+    let parent_inner = position.inner();
+    let child_inner = child.inner();
+    let mut removed = Vec::new();
+    let mut added = Vec::new();
+
+    push_changed(
+        &mut removed,
+        &mut added,
+        Some(role_feature(role)),
+        Some(role_feature(role)),
+    );
+    push_changed(
+        &mut removed,
+        &mut added,
+        Some(side_to_move_feature(parent_inner.side_to_move())),
+        Some(side_to_move_feature(child_inner.side_to_move())),
+    );
+
+    let parent_king = role.defender_color(parent_inner.side_to_move());
+    let child_king = role.defender_color(child_inner.side_to_move());
+    for square in Square::all() {
+        push_changed(
+            &mut removed,
+            &mut added,
+            board_feature(parent_inner, square, parent_king),
+            board_feature(child_inner, square, child_king),
+        );
+    }
+
+    for color in Color::all() {
+        let parent_hand = parent_inner.hand_of_a_player(color);
+        let child_hand = child_inner.hand_of_a_player(color);
+        for (piece_index, piece_kind) in Hand::all_hand_pieces().enumerate() {
+            let parent_count = parent_hand.count(piece_kind).unwrap_or(0);
+            let child_count = child_hand.count(piece_kind).unwrap_or(0);
+            push_changed(
+                &mut removed,
+                &mut added,
+                (parent_count > 0).then(|| hand_feature(color, piece_index as u32, parent_count)),
+                (child_count > 0).then(|| hand_feature(color, piece_index as u32, child_count)),
+            );
+        }
+    }
+
+    (removed, added)
+}
+
+fn board_feature(
+    position: &shogi_core::PartialPosition,
+    square: Square,
+    defender_king: Color,
+) -> Option<FeatureId> {
+    let piece = position.piece_at(square)?;
+    let (piece_kind, color) = piece.to_parts();
+    Some(match position.king_position(defender_king) {
+        Some(king) => board_relative_feature(color, piece_kind, square, king),
+        None => board_absolute_feature(color, piece_kind, square),
+    })
+}
+
+fn push_changed(
+    removed: &mut Vec<FeatureId>,
+    added: &mut Vec<FeatureId>,
+    parent: Option<FeatureId>,
+    child: Option<FeatureId>,
+) {
+    if parent != child {
+        if let Some(feature) = parent {
+            removed.push(feature);
+        }
+        if let Some(feature) = child {
+            added.push(feature);
+        }
+    }
+}
+
 fn role_feature(role: FeatureRole) -> FeatureId {
     FeatureId(ROLE_BASE + role.index())
 }
@@ -134,7 +222,7 @@ fn color_piece_index(color: Color, piece_kind: PieceKind) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shogi_core::PartialPosition;
+    use shogi_core::{Color, Move, PartialPosition, Piece, PieceKind, Square};
     use shogi_usi_parser::FromUsi;
 
     fn wrapped(sfen: &str) -> PositionWrapper {
@@ -177,6 +265,39 @@ mod tests {
 
         assert!(position_features(&black, FeatureRole::Attacker).contains(&FeatureId(10)));
         assert!(position_features(&white, FeatureRole::Attacker).contains(&FeatureId(11)));
+    }
+
+    #[test]
+    fn direct_move_delta_matches_position_feature_delta() {
+        let position = wrapped("4k4/9/9/9/9/9/9/9/4K4 b G 1");
+        let mv = Move::Drop {
+            piece: Piece::new(PieceKind::Gold, Color::Black),
+            to: Square::SQ_5E,
+        };
+        let mut child = position.clone();
+        child.make_move(mv);
+
+        let mut expected_removed = position_features(&position, FeatureRole::Attacker);
+        let mut expected_added = position_features(&child, FeatureRole::Attacker);
+        let mut common = Vec::new();
+        for feature in expected_removed.clone() {
+            if let Some(index) = expected_added
+                .iter()
+                .position(|candidate| *candidate == feature)
+            {
+                expected_added.remove(index);
+                common.push(feature);
+            }
+        }
+        expected_removed.retain(|feature| !common.contains(feature));
+
+        let (mut removed, mut added) = position_feature_delta(&position, mv, FeatureRole::Attacker);
+        removed.sort_unstable();
+        added.sort_unstable();
+        expected_removed.sort_unstable();
+        expected_added.sort_unstable();
+        assert_eq!(removed, expected_removed);
+        assert_eq!(added, expected_added);
     }
 
     #[test]

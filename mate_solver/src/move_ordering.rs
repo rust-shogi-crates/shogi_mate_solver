@@ -1,8 +1,8 @@
 use shogi_core::Move;
 
 use crate::{
-    features::{position_features, FeatureId, FeatureRole},
-    nnue::NnueScorer,
+    features::{position_feature_delta, position_features, FeatureId, FeatureRole},
+    nnue::{NnueAccumulator, NnueScorer},
     position_wrapper::PositionWrapper,
     tt::DfPnTable,
 };
@@ -94,13 +94,25 @@ pub fn order_df_pn_moves(
         return;
     }
 
+    let base_accumulator = match &options.scorer {
+        MoveOrderingScorer::Fixture(_) => None,
+        MoveOrderingScorer::Nnue(scorer) => {
+            Some(scorer.accumulator(&position_features(position, role)))
+        }
+    };
     let mut ordered: Vec<_> = moves
         .iter()
         .copied()
         .enumerate()
         .map(|(index, mv)| {
             let primary = df_pn_primary_key(mv);
-            let score = score_move(&options.scorer, position, mv, role);
+            let score = score_child_position(
+                &options.scorer,
+                base_accumulator.as_ref(),
+                position,
+                mv,
+                role,
+            );
             (primary, -score, index, mv)
         })
         .collect();
@@ -130,6 +142,12 @@ pub fn order_eval_moves_with_role(
         MoveOrderingMode::FixtureScore
         | MoveOrderingMode::NnueFixture
         | MoveOrderingMode::NnueModel => {
+            let base_accumulator = match &options.scorer {
+                MoveOrderingScorer::Fixture(_) => None,
+                MoveOrderingScorer::Nnue(scorer) => {
+                    Some(scorer.accumulator(&position_features(position, role)))
+                }
+            };
             let mut ordered: Vec<_> = moves
                 .iter()
                 .copied()
@@ -141,7 +159,13 @@ pub fn order_eval_moves_with_role(
                         .fetch(cp.zobrist_hash())
                         .map(|(_, delta)| delta)
                         .unwrap_or(1);
-                    let score = score_position(&options.scorer, &cp, role);
+                    let score = score_child_position(
+                        &options.scorer,
+                        base_accumulator.as_ref(),
+                        position,
+                        mv,
+                        role,
+                    );
                     (primary, -score, index, mv)
                 })
                 .collect();
@@ -153,23 +177,28 @@ pub fn order_eval_moves_with_role(
     }
 }
 
-fn score_move(
+fn score_child_position(
     scorer: &MoveOrderingScorer,
+    base_accumulator: Option<&NnueAccumulator>,
     position: &PositionWrapper,
     mv: Move,
     role: FeatureRole,
 ) -> i32 {
-    let mut child = position.clone();
-    child.make_move(mv);
-    score_position(scorer, &child, role)
-}
-
-fn score_position(
-    scorer: &MoveOrderingScorer,
-    position: &PositionWrapper,
-    role: FeatureRole,
-) -> i32 {
-    scorer.score(&position_features(position, role))
+    match scorer {
+        MoveOrderingScorer::Fixture(scorer) => {
+            let mut child = position.clone();
+            child.make_move(mv);
+            scorer.score(&position_features(&child, role))
+        }
+        MoveOrderingScorer::Nnue(scorer) => {
+            let (removed, added) = position_feature_delta(position, mv, role);
+            scorer.score_accumulator_delta(
+                base_accumulator.expect("NNUE base accumulator"),
+                &removed,
+                &added,
+            )
+        }
+    }
 }
 
 fn df_pn_primary_key(mv: Move) -> u8 {
