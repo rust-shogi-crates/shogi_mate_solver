@@ -5,6 +5,8 @@ use std::{
 
 use df_pn::search as dfpnsearch;
 use eval::{search as evalsearch, Value};
+use move_ordering::{MoveOrderingMode, MoveOrderingOptions, MoveOrderingScorer};
+use nnue::NnueScorer;
 use position_wrapper::PositionWrapper;
 use shogi_core::{Move, PartialPosition};
 use tt::{DfPnTable, EvalTable};
@@ -47,6 +49,15 @@ impl SearchConfig {
         Self {
             deadline: Some(deadline),
             max_positions: Some(max_positions),
+        }
+    }
+
+    pub fn remaining_positions(self, positions_inspected: u64) -> Self {
+        Self {
+            deadline: self.deadline,
+            max_positions: self
+                .max_positions
+                .map(|max_positions| max_positions.saturating_sub(positions_inspected)),
         }
     }
 
@@ -160,12 +171,14 @@ pub struct Options {
 }
 
 // Returns true if the branch is worth recording.
+#[allow(clippy::too_many_arguments)]
 fn find_branches(
     df_pn: &mut DfPnTable,
     evals: &mut EvalTable,
     position: &PositionWrapper,
     opt: Value,
     opts: &Options,
+    move_ordering: &MoveOrderingOptions,
     memo: &mut HashMap<Vec<Move>, BranchEntry>,
     current: Vec<Move>,
 ) -> bool {
@@ -173,13 +186,16 @@ fn find_branches(
     if turn > opt.plies() as usize {
         return false;
     }
-    if turn % 2 == 1 && dfpnsearch::df_pn(df_pn, position, opts.verbose) != (u32::MAX, 0) {
+    if turn % 2 == 1
+        && dfpnsearch::df_pn_with_options(df_pn, position, opts.verbose, move_ordering)
+            != (u32::MAX, 0)
+    {
         return false;
     }
     let beta = opt.plies_added_unchecked(turn as i32);
     let mut ctx = evalsearch::SearchCtx::default();
     let (value, mv) = if turn.is_multiple_of(2) {
-        evalsearch::alpha_beta_me(
+        evalsearch::alpha_beta_me_with_options(
             position,
             df_pn,
             evals,
@@ -188,9 +204,10 @@ fn find_branches(
             &mut BTreeSet::new(),
             &mut ctx,
             opts.verbose,
+            move_ordering,
         )
     } else {
-        evalsearch::alpha_beta_you(
+        evalsearch::alpha_beta_you_with_options(
             position,
             df_pn,
             evals,
@@ -199,6 +216,7 @@ fn find_branches(
             &mut BTreeSet::new(),
             &mut ctx,
             opts.verbose,
+            move_ordering,
         )
     };
     let all_moves = if turn.is_multiple_of(2) {
@@ -220,7 +238,16 @@ fn find_branches(
         next.push(mv);
         let mut next_position = position.clone();
         next_position.make_move(mv);
-        if find_branches(df_pn, evals, &next_position, opt, opts, memo, next) {
+        if find_branches(
+            df_pn,
+            evals,
+            &next_position,
+            opt,
+            opts,
+            move_ordering,
+            memo,
+            next,
+        ) {
             possible_next_moves.push(mv);
         }
     }
@@ -235,6 +262,15 @@ fn find_branches(
 }
 
 pub fn search(position: &PartialPosition, _timeout_ms: u64) -> Answer {
+    search_with_options(position, _timeout_ms, MoveOrderingOptions::default())
+}
+
+/// Searches with an explicitly selected move-ordering scorer.
+pub fn search_with_options(
+    position: &PartialPosition,
+    _timeout_ms: u64,
+    move_ordering: MoveOrderingOptions,
+) -> Answer {
     // TODO: use wasm-timer
     let verbose = true;
     let size = 1 << 16;
@@ -244,11 +280,12 @@ pub fn search(position: &PartialPosition, _timeout_ms: u64) -> Answer {
     let mut eval = EvalTable::new(size);
     let mut df_pn_stats = dfpnsearch::SearchStats::default();
     let mut eval_stats = evalsearch::SearchStats::default();
-    let mate_result = dfpnsearch::df_pn_with_stats(
+    let mate_result = dfpnsearch::df_pn_with_options_and_stats(
         &mut df_pn,
         &position_wrapper::PositionWrapper::new(position.clone()),
         verbose,
         &mut df_pn_stats,
+        &move_ordering,
     );
     // 不詰。
     if mate_result == (u32::MAX, 0) {
@@ -261,13 +298,14 @@ pub fn search(position: &PartialPosition, _timeout_ms: u64) -> Answer {
             elapsed: 0.0,
         };
     }
-    let result = evalsearch::search_with_stats(
+    let result = evalsearch::search_with_options_and_stats(
         position,
         &mut df_pn,
         &mut eval,
         verbose,
         &mut eval_stats,
         &mut df_pn_stats,
+        &move_ordering,
     );
     if verbose {
         eprintln!("! result = {:?}", result);
@@ -289,6 +327,7 @@ pub fn search(position: &PartialPosition, _timeout_ms: u64) -> Answer {
         &position_wrapper::PositionWrapper::new(position.clone()),
         result,
         &Options { verbose },
+        &move_ordering,
         &mut branches_hashmap,
         vec![],
     );
@@ -305,4 +344,32 @@ pub fn search(position: &PartialPosition, _timeout_ms: u64) -> Answer {
         stats: SearchStats::from_internal(df_pn_stats, eval_stats),
         elapsed,
     }
+}
+
+/// Loads an `NNUE-FIXTURE 1` text model and searches with NNUE move ordering.
+pub fn search_with_model(
+    position: &PartialPosition,
+    timeout_ms: u64,
+    model_text: &str,
+) -> Result<Answer, String> {
+    let scorer = NnueScorer::from_model(model_text)?;
+    Ok(search_with_options(
+        position,
+        timeout_ms,
+        MoveOrderingOptions {
+            mode: MoveOrderingMode::NnueModel,
+            scorer: MoveOrderingScorer::Nnue(scorer),
+        },
+    ))
+}
+
+/// Loads an `NNUE-FIXTURE 1` model from bytes and searches with NNUE ordering.
+pub fn search_with_model_bytes(
+    position: &PartialPosition,
+    timeout_ms: u64,
+    model_bytes: &[u8],
+) -> Result<Answer, String> {
+    let model_text = std::str::from_utf8(model_bytes)
+        .map_err(|error| format!("NNUE model is not UTF-8: {error}"))?;
+    search_with_model(position, timeout_ms, model_text)
 }

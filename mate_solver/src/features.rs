@@ -2,10 +2,9 @@
 //!
 //! The ID ranges are part of the feature format contract:
 //! roles start at 0, side-to-move at 10, king-relative board features at
-//! 1_000, absolute board fallback features at 10_000, hands at 20_000,
-//! and candidate move facts at 30_000. Hand counts use one count-bucket
-//! feature per color/piece kind, capped at bucket 19 for malformed
-//! positions with unusually large hands.
+//! 1_000, absolute board fallback features at 10_000, and hands at 20_000.
+//! Hand counts use one count-bucket feature per color/piece kind, capped at
+//! bucket 19 for malformed positions with unusually large hands.
 
 use shogi_core::{Color, Hand, Move, PieceKind, Square};
 
@@ -26,7 +25,6 @@ const SIDE_TO_MOVE_BASE: u32 = 10;
 const BOARD_RELATIVE_BASE: u32 = 1_000;
 const BOARD_ABSOLUTE_BASE: u32 = 10_000;
 const HAND_BASE: u32 = 20_000;
-const MOVE_BASE: u32 = 30_000;
 
 const COLORS: u32 = Color::NUM as u32;
 const PIECE_KINDS: u32 = PieceKind::NUM as u32;
@@ -34,13 +32,6 @@ const SQUARES: u32 = Square::NUM as u32;
 const RELATIVE_COORDS: u32 = 17;
 const HAND_PIECES: u32 = Hand::NUM_HAND_PIECES as u32;
 const HAND_COUNT_BUCKETS: u32 = 20;
-
-const NORMAL_MOVE_KIND: u32 = MOVE_BASE;
-const DROP_MOVE_KIND: u32 = MOVE_BASE + 1;
-const MOVE_FROM_BASE: u32 = MOVE_BASE + 100;
-const MOVE_TO_BASE: u32 = MOVE_BASE + 200;
-const MOVE_PROMOTE: u32 = MOVE_BASE + 300;
-const MOVE_DROP_PIECE_BASE: u32 = MOVE_BASE + 400;
 
 impl FeatureRole {
     fn index(self) -> u32 {
@@ -90,43 +81,92 @@ pub fn position_features(position: &PositionWrapper, role: FeatureRole) -> Vec<F
     features
 }
 
-pub fn move_features(mv: Move, role: FeatureRole) -> Vec<FeatureId> {
-    let mut features = vec![role_feature(role)];
-    features.extend(move_features_without_role(mv));
-    features
-}
-
-fn move_features_without_role(mv: Move) -> Vec<FeatureId> {
-    let mut features = Vec::new();
-    match mv {
-        Move::Normal { from, to, promote } => {
-            features.push(FeatureId(NORMAL_MOVE_KIND));
-            features.push(square_feature(MOVE_FROM_BASE, from));
-            features.push(square_feature(MOVE_TO_BASE, to));
-            if promote {
-                features.push(FeatureId(MOVE_PROMOTE));
-            }
-        }
-        Move::Drop { piece, to } => {
-            features.push(FeatureId(DROP_MOVE_KIND));
-            features.push(square_feature(MOVE_TO_BASE, to));
-            features.push(FeatureId(
-                MOVE_DROP_PIECE_BASE + piece.piece_kind().array_index() as u32,
-            ));
-        }
-    }
-
-    features
-}
-
-pub fn candidate_features(
+/// Returns the feature IDs removed from and added to `position` by `mv`.
+///
+/// The relative king frame can change after every move because the side to
+/// move changes, so board features are compared square-by-square in O(81)
+/// rather than by searching two feature vectors against each other.
+pub fn position_feature_delta(
     position: &PositionWrapper,
     mv: Move,
     role: FeatureRole,
-) -> Vec<FeatureId> {
-    let mut features = position_features(position, role);
-    features.extend(move_features_without_role(mv));
-    features
+) -> (Vec<FeatureId>, Vec<FeatureId>) {
+    let mut child = position.clone();
+    child.make_move(mv);
+    let parent_inner = position.inner();
+    let child_inner = child.inner();
+    let mut removed = Vec::new();
+    let mut added = Vec::new();
+
+    push_changed(
+        &mut removed,
+        &mut added,
+        Some(role_feature(role)),
+        Some(role_feature(role)),
+    );
+    push_changed(
+        &mut removed,
+        &mut added,
+        Some(side_to_move_feature(parent_inner.side_to_move())),
+        Some(side_to_move_feature(child_inner.side_to_move())),
+    );
+
+    let parent_king = role.defender_color(parent_inner.side_to_move());
+    let child_king = role.defender_color(child_inner.side_to_move());
+    for square in Square::all() {
+        push_changed(
+            &mut removed,
+            &mut added,
+            board_feature(parent_inner, square, parent_king),
+            board_feature(child_inner, square, child_king),
+        );
+    }
+
+    for color in Color::all() {
+        let parent_hand = parent_inner.hand_of_a_player(color);
+        let child_hand = child_inner.hand_of_a_player(color);
+        for (piece_index, piece_kind) in Hand::all_hand_pieces().enumerate() {
+            let parent_count = parent_hand.count(piece_kind).unwrap_or(0);
+            let child_count = child_hand.count(piece_kind).unwrap_or(0);
+            push_changed(
+                &mut removed,
+                &mut added,
+                (parent_count > 0).then(|| hand_feature(color, piece_index as u32, parent_count)),
+                (child_count > 0).then(|| hand_feature(color, piece_index as u32, child_count)),
+            );
+        }
+    }
+
+    (removed, added)
+}
+
+fn board_feature(
+    position: &shogi_core::PartialPosition,
+    square: Square,
+    defender_king: Color,
+) -> Option<FeatureId> {
+    let piece = position.piece_at(square)?;
+    let (piece_kind, color) = piece.to_parts();
+    Some(match position.king_position(defender_king) {
+        Some(king) => board_relative_feature(color, piece_kind, square, king),
+        None => board_absolute_feature(color, piece_kind, square),
+    })
+}
+
+fn push_changed(
+    removed: &mut Vec<FeatureId>,
+    added: &mut Vec<FeatureId>,
+    parent: Option<FeatureId>,
+    child: Option<FeatureId>,
+) {
+    if parent != child {
+        if let Some(feature) = parent {
+            removed.push(feature);
+        }
+        if let Some(feature) = child {
+            added.push(feature);
+        }
+    }
 }
 
 fn role_feature(role: FeatureRole) -> FeatureId {
@@ -173,10 +213,6 @@ fn hand_feature(color: Color, piece_index: u32, count: u8) -> FeatureId {
     )
 }
 
-fn square_feature(base: u32, square: Square) -> FeatureId {
-    FeatureId(base + square.array_index() as u32)
-}
-
 fn color_piece_index(color: Color, piece_kind: PieceKind) -> u32 {
     let index = color.array_index() as u32 * PIECE_KINDS + piece_kind.array_index() as u32;
     debug_assert!(index < COLORS * PIECE_KINDS);
@@ -186,7 +222,7 @@ fn color_piece_index(color: Color, piece_kind: PieceKind) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shogi_core::{PartialPosition, Piece, ToUsi};
+    use shogi_core::{Color, Move, PartialPosition, Piece, PieceKind, Square};
     use shogi_usi_parser::FromUsi;
 
     fn wrapped(sfen: &str) -> PositionWrapper {
@@ -232,6 +268,73 @@ mod tests {
     }
 
     #[test]
+    fn direct_move_delta_matches_position_feature_delta() {
+        assert_direct_delta_matches(
+            "4k4/9/9/9/9/9/9/9/4K4 b G 1",
+            Move::Drop {
+                piece: Piece::new(PieceKind::Gold, Color::Black),
+                to: Square::SQ_5E,
+            },
+            FeatureRole::Attacker,
+        );
+        assert_direct_delta_matches(
+            "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1",
+            Move::Normal {
+                from: Square::SQ_7G,
+                to: Square::SQ_7F,
+                promote: false,
+            },
+            FeatureRole::Attacker,
+        );
+        assert_direct_delta_matches(
+            "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1",
+            Move::Normal {
+                from: Square::SQ_7G,
+                to: Square::SQ_7F,
+                promote: false,
+            },
+            FeatureRole::Defender,
+        );
+        assert_direct_delta_matches(
+            "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1",
+            Move::Normal {
+                from: Square::SQ_5I,
+                to: Square::SQ_5H,
+                promote: false,
+            },
+            FeatureRole::Attacker,
+        );
+    }
+
+    fn assert_direct_delta_matches(sfen: &str, mv: Move, role: FeatureRole) {
+        let position = wrapped(sfen);
+        let mut child = position.clone();
+        child.make_move(mv);
+
+        let mut expected_removed = position_features(&position, role);
+        let mut expected_added = position_features(&child, role);
+        let mut common = Vec::new();
+        for feature in expected_removed.clone() {
+            if let Some(index) = expected_added
+                .iter()
+                .position(|candidate| *candidate == feature)
+            {
+                expected_added.remove(index);
+                common.push(feature);
+            }
+        }
+        expected_removed.retain(|feature| !common.contains(feature));
+
+        let (mut removed, mut added) = position_feature_delta(&position, mv, role);
+        removed.sort_unstable();
+        added.sort_unstable();
+        expected_removed.sort_unstable();
+        expected_added.sort_unstable();
+        assert_eq!(removed, expected_removed);
+        assert_eq!(added, expected_added);
+    }
+
+    #[test]
     fn missing_defender_king_uses_absolute_board_features() {
         let position = wrapped("9/9/9/9/9/9/9/9/4K4 b - 1");
 
@@ -241,75 +344,5 @@ mod tests {
             features,
             vec![FeatureId(0), FeatureId(10), FeatureId(10611)]
         );
-    }
-
-    #[test]
-    fn normal_move_features_include_from_to_and_promotion() {
-        let mv = Move::Normal {
-            from: Square::SQ_5I,
-            to: Square::SQ_5H,
-            promote: true,
-        };
-
-        assert_eq!(
-            move_features(mv, FeatureRole::Attacker),
-            vec![
-                FeatureId(0),
-                FeatureId(30000),
-                FeatureId(30144),
-                FeatureId(30243),
-                FeatureId(30300),
-            ]
-        );
-    }
-
-    #[test]
-    fn drop_move_features_include_piece_and_destination_without_from() {
-        let mv = Move::Drop {
-            piece: Piece::B_S,
-            to: Square::SQ_5B,
-        };
-
-        assert_eq!(
-            move_features(mv, FeatureRole::Defender),
-            vec![
-                FeatureId(1),
-                FeatureId(30001),
-                FeatureId(30237),
-                FeatureId(30403)
-            ]
-        );
-    }
-
-    #[test]
-    fn attacker_and_defender_roles_use_distinct_role_features() {
-        let mv = Move::Drop {
-            piece: Piece::B_G,
-            to: Square::SQ_5B,
-        };
-
-        assert_ne!(
-            move_features(mv, FeatureRole::Attacker)[0],
-            move_features(mv, FeatureRole::Defender)[0],
-        );
-    }
-
-    #[test]
-    fn candidate_features_append_move_features_after_position_features() {
-        let position = wrapped("4k4/9/9/9/9/9/9/9/4K4 b G 1");
-        let mv = Move::Drop {
-            piece: Piece::B_G,
-            to: Square::SQ_5B,
-        };
-        let features = candidate_features(&position, mv, FeatureRole::Attacker);
-        let rendered = features
-            .iter()
-            .map(|feature| feature.0.to_string())
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        eprintln!("features for {}: {rendered}", mv.to_usi_owned());
-        assert_eq!(mv.to_usi_owned(), "G*5b");
-        assert_eq!(rendered, "0 10 7213 3175 20081 30001 30237 30404");
     }
 }

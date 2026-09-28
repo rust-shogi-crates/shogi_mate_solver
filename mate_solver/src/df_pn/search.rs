@@ -120,17 +120,38 @@ pub fn df_pn_with_options_and_stats(
     stats: &mut SearchStats,
     move_ordering: &MoveOrderingOptions,
 ) -> (u32, u32) {
+    df_pn_with_config_and_options_and_stats(
+        dfpn_tbl,
+        position,
+        verbose,
+        stats,
+        move_ordering,
+        SearchConfig::default(),
+    )
+}
+
+pub fn df_pn_with_config_and_options_and_stats(
+    dfpn_tbl: &mut DfPnTable,
+    position: &PositionWrapper,
+    verbose: bool,
+    stats: &mut SearchStats,
+    move_ordering: &MoveOrderingOptions,
+    config: SearchConfig,
+) -> (u32, u32) {
     let (phi_now, delta_now) = mid_with_options_and_stats(
         dfpn_tbl,
         position,
         (u32::MAX - 1, u32::MAX - 1),
         NodeKind::Or,
         true,
-        &mut Default::default(),
+        &mut SearchCtx::with_config(config),
         verbose,
         stats,
         move_ordering,
     );
+    if stats.limit_reached {
+        return (phi_now, delta_now);
+    }
     // ループを見つけてしまった
     if phi_now != u32::MAX && delta_now != u32::MAX {
         eprintln!("! loop found: {} {}", phi_now, delta_now);
@@ -141,7 +162,7 @@ pub fn df_pn_with_options_and_stats(
             (u32::MAX, u32::MAX),
             NodeKind::Or,
             false,
-            &mut Default::default(),
+            &mut SearchCtx::with_config(config),
             verbose,
             stats,
             move_ordering,

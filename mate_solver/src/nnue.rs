@@ -1,9 +1,12 @@
+use std::{collections::BTreeMap, sync::Arc};
+
 use crate::features::FeatureId;
 
 pub mod parse;
 
 const HIDDEN_UNITS: usize = 2;
 const MAX_FEATURE_WEIGHTS: usize = 256;
+pub const PROBABILITY_SCALE: u32 = 1_000_000;
 const EMPTY_FEATURE_WEIGHT: FeatureWeight = FeatureWeight {
     feature: FeatureId(0),
     weights: [0; HIDDEN_UNITS],
@@ -17,6 +20,8 @@ struct FeatureWeight {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NnueScorer {
+    deep_model: Option<parse::DeepModel>,
+    deep_feature_weights: Option<Arc<BTreeMap<u32, Vec<i64>>>>,
     hidden_bias: [i32; HIDDEN_UNITS],
     feature_weights: Box<[FeatureWeight; MAX_FEATURE_WEIGHTS]>,
     feature_count: usize,
@@ -25,15 +30,21 @@ pub struct NnueScorer {
     output_shift: u32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NnueAccumulator {
+    hidden: [i32; HIDDEN_UNITS],
+    layer1: Vec<i64>,
+}
+
 impl Default for NnueScorer {
     fn default() -> Self {
         let mut scorer = Self::empty();
-        // The fixture intentionally gives promoted moves a positive signal.
-        scorer.add_feature(FeatureId(30_300), [64, 32]);
+        // The fixture intentionally gives a stable child-position feature a positive signal.
+        scorer.add_feature(FeatureId(10_691), [64, 32]);
         scorer.add_feature(FeatureId(0), [128, -128]);
         scorer.add_feature(FeatureId(1), [-128, 128]);
-        // FeatureId(30_001) is DROP_MOVE_KIND; the fixture favors drops.
-        scorer.add_feature(FeatureId(30_001), [64, 32]);
+        // FeatureId(20_061) is a stable hand-count feature used by the fixture.
+        scorer.add_feature(FeatureId(20_061), [64, 32]);
         scorer
     }
 }
@@ -41,6 +52,8 @@ impl Default for NnueScorer {
 impl NnueScorer {
     fn empty() -> Self {
         Self {
+            deep_model: None,
+            deep_feature_weights: None,
             hidden_bias: [0, 0],
             feature_weights: Box::new([EMPTY_FEATURE_WEIGHT; MAX_FEATURE_WEIGHTS]),
             feature_count: 0,
@@ -57,39 +70,205 @@ impl NnueScorer {
 
     /// Loads the versioned text format emitted by `nnue_training learn`.
     pub fn from_model(text: &str) -> Result<Self, String> {
-        let model = parse::parse_model(text)?;
-        let mut scorer = Self::empty();
-        scorer.hidden_bias = model.hidden_bias;
-        scorer.output_weights = model.output_weights;
-        scorer.output_bias = model.output_bias;
-        scorer.output_shift = model.output_shift;
-        for (feature, weights) in model.feature_weights {
-            scorer.add_feature(FeatureId(feature), weights);
-        }
-        Ok(scorer)
+        let deep_model = parse::parse_deep_model(text)?;
+        let deep_feature_weights = project_feature_weights(&deep_model);
+        Ok(Self {
+            deep_model: Some(deep_model),
+            deep_feature_weights: Some(Arc::new(deep_feature_weights)),
+            ..Self::empty()
+        })
     }
 
     pub fn score(&self, features: &[FeatureId]) -> i32 {
-        let mut hidden = self.hidden_bias;
+        let accumulator = self.accumulator(features);
+        self.score_accumulator(&accumulator)
+    }
+
+    pub fn accumulator(&self, features: &[FeatureId]) -> NnueAccumulator {
+        let mut accumulator = NnueAccumulator {
+            hidden: self.hidden_bias,
+            layer1: self.deep_model.as_ref().map_or_else(Vec::new, |model| {
+                model
+                    .layer1_bias
+                    .iter()
+                    .map(|&bias| i64::from(bias))
+                    .collect()
+            }),
+        };
         for &feature in features {
-            if let Some(weight) = self.feature_weights[..self.feature_count]
-                .iter()
-                .find(|weight| weight.feature == feature)
-            {
-                for (value, weight) in hidden.iter_mut().zip(weight.weights) {
-                    *value += weight;
-                }
+            self.apply_feature(&mut accumulator, feature, 1);
+        }
+        accumulator
+    }
+
+    pub fn score_accumulator(&self, accumulator: &NnueAccumulator) -> i32 {
+        if let Some(model) = &self.deep_model {
+            return score_deep_layer1(model, &accumulator.layer1);
+        }
+        score_fixture_hidden(
+            accumulator.hidden,
+            self.output_weights,
+            self.output_bias,
+            self.output_shift,
+        )
+    }
+
+    pub fn score_accumulator_delta(
+        &self,
+        accumulator: &NnueAccumulator,
+        removed: &[FeatureId],
+        added: &[FeatureId],
+    ) -> i32 {
+        if let Some(model) = &self.deep_model {
+            let mut layer1 = accumulator.layer1.clone();
+            for &feature in removed {
+                self.apply_deep_feature_delta(&mut layer1, feature, -1);
             }
+            for &feature in added {
+                self.apply_deep_feature_delta(&mut layer1, feature, 1);
+            }
+            return score_deep_layer1(model, &layer1);
         }
 
-        let output = hidden
-            .into_iter()
-            .zip(self.output_weights)
-            .map(|(value, weight)| value.max(0) * weight)
-            .sum::<i32>()
-            + self.output_bias;
-        output >> self.output_shift
+        let mut hidden = accumulator.hidden;
+        for &feature in removed {
+            self.apply_fixture_feature_delta(&mut hidden, feature, -1);
+        }
+        for &feature in added {
+            self.apply_fixture_feature_delta(&mut hidden, feature, 1);
+        }
+        score_fixture_hidden(
+            hidden,
+            self.output_weights,
+            self.output_bias,
+            self.output_shift,
+        )
     }
+
+    fn apply_feature(&self, accumulator: &mut NnueAccumulator, feature: FeatureId, sign: i32) {
+        if self.deep_model.is_some() {
+            self.apply_deep_feature_delta(&mut accumulator.layer1, feature, sign);
+        } else {
+            self.apply_fixture_feature_delta(&mut accumulator.hidden, feature, sign);
+        }
+    }
+
+    fn apply_deep_feature_delta(&self, layer1: &mut [i64], feature: FeatureId, sign: i32) {
+        if let Some(weights) = self
+            .deep_feature_weights
+            .as_ref()
+            .and_then(|weights| weights.get(&feature.0))
+        {
+            for (value, weight) in layer1.iter_mut().zip(weights) {
+                *value += i64::from(sign) * *weight;
+            }
+        }
+    }
+
+    fn apply_fixture_feature_delta(
+        &self,
+        hidden: &mut [i32; HIDDEN_UNITS],
+        feature: FeatureId,
+        sign: i32,
+    ) {
+        if let Some(weight) = self.feature_weights[..self.feature_count]
+            .iter()
+            .find(|weight| weight.feature == feature)
+        {
+            for (value, weight) in hidden.iter_mut().zip(weight.weights) {
+                *value += sign * weight;
+            }
+        }
+    }
+
+    /// Returns sigmoid(score) scaled to the integer range 0..=1_000_000.
+    pub fn probability(&self, features: &[FeatureId]) -> u32 {
+        let logit_scale = self
+            .deep_model
+            .as_ref()
+            .map_or(parse::DEFAULT_LOGIT_SCALE, |model| model.logit_scale);
+        let logit = f64::from(self.score(features)) / f64::from(logit_scale);
+        let probability = if logit >= 0.0 {
+            1.0 / (1.0 + (-logit).exp())
+        } else {
+            let exp = logit.exp();
+            exp / (1.0 + exp)
+        };
+        (probability * f64::from(PROBABILITY_SCALE)).round() as u32
+    }
+}
+
+fn score_deep_layer1(model: &parse::DeepModel, layer1: &[i64]) -> i32 {
+    let hidden1 = dense_relu(
+        layer1,
+        &model.layer2_weights,
+        &model.layer2_bias,
+        parse::DEEP_HIDDEN_1,
+    );
+    let output = i64::from(model.output_bias)
+        + hidden1
+            .iter()
+            .zip(&model.output_weights)
+            .map(|(value, weight)| value * i64::from(*weight))
+            .sum::<i64>();
+    clamp_i64_to_i32(output >> model.output_shift)
+}
+
+fn dense_relu(input: &[i64], weights: &[i32], bias: &[i32], input_width: usize) -> Vec<i64> {
+    bias.iter()
+        .enumerate()
+        .map(|(row, bias)| {
+            let start = row * input_width;
+            let sum = i64::from(*bias)
+                + input
+                    .iter()
+                    .zip(&weights[start..start + input_width])
+                    .map(|(value, weight)| *value * i64::from(*weight))
+                    .sum::<i64>();
+            sum.max(0)
+        })
+        .collect()
+}
+
+fn project_feature_weights(model: &parse::DeepModel) -> BTreeMap<u32, Vec<i64>> {
+    model
+        .input_weights
+        .iter()
+        .map(|(&feature, input_weights)| {
+            let projected = (0..parse::DEEP_HIDDEN_1)
+                .map(|row| {
+                    let start = row * parse::DEEP_INPUTS;
+                    input_weights
+                        .iter()
+                        .zip(&model.layer1_weights[start..start + parse::DEEP_INPUTS])
+                        .map(|(input_weight, layer_weight)| {
+                            i64::from(*input_weight) * i64::from(*layer_weight)
+                        })
+                        .sum()
+                })
+                .collect();
+            (feature, projected)
+        })
+        .collect()
+}
+
+fn score_fixture_hidden(
+    hidden: [i32; HIDDEN_UNITS],
+    output_weights: [i32; HIDDEN_UNITS],
+    output_bias: i32,
+    output_shift: u32,
+) -> i32 {
+    let output = hidden
+        .into_iter()
+        .zip(output_weights)
+        .map(|(value, weight)| value.max(0) * weight)
+        .sum::<i32>()
+        + output_bias;
+    output >> output_shift
+}
+
+fn clamp_i64_to_i32(value: i64) -> i32 {
+    value.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
 #[cfg(test)]
@@ -99,36 +278,36 @@ mod tests {
     #[test]
     fn fixture_inference_is_deterministic() {
         let scorer = NnueScorer::default();
-        let features = [FeatureId(0), FeatureId(30_300)];
+        let features = [FeatureId(0), FeatureId(10_691)];
 
         assert_eq!(scorer.score(&features), scorer.score(&features));
     }
 
     #[test]
-    fn fixture_inference_rewards_promotion_feature() {
+    fn fixture_inference_rewards_child_position_feature() {
         let scorer = NnueScorer::default();
 
-        assert!(scorer.score(&[FeatureId(30_300)]) > scorer.score(&[]));
+        assert!(scorer.score(&[FeatureId(10_691)]) > scorer.score(&[]));
     }
 
     #[test]
-    fn fixture_inference_rewards_drop_feature() {
+    fn fixture_inference_rewards_hand_feature() {
         let scorer = NnueScorer::default();
 
-        assert!(scorer.score(&[FeatureId(30_001)]) > scorer.score(&[]));
+        assert!(scorer.score(&[FeatureId(20_061)]) > scorer.score(&[]));
     }
 
     #[test]
     fn learned_model_round_trips_into_runtime() {
-        let model = "NNUE-FIXTURE 1\nhidden_units 2\nhidden_bias 0 0\noutput_weights 2 1\noutput_bias 0\noutput_shift 7\nfeature 30300 64 32\n";
-        let scorer = NnueScorer::from_model(model).unwrap();
+        let model = parse::DeepModel::empty().to_text();
+        let scorer = NnueScorer::from_model(&model).unwrap();
 
-        assert_eq!(scorer.score(&[FeatureId(30_300)]), 1);
+        assert_eq!(scorer.score(&[FeatureId(10_691)]), 64);
     }
 
     #[test]
     fn model_requires_all_runtime_fields() {
-        let model = "NNUE-FIXTURE 1\nhidden_units 2\n";
+        let model = "NNUE-FIXTURE 1\nhidden_units 512 32 32\n";
 
         assert_eq!(
             NnueScorer::from_model(model),
@@ -138,10 +317,11 @@ mod tests {
 
     #[test]
     fn model_rejects_unsafe_output_shift() {
-        let model = "NNUE-FIXTURE 1\nhidden_units 2\nhidden_bias 0 0\noutput_weights 2 1\noutput_bias 0\noutput_shift 32\n";
+        let mut model = parse::DeepModel::empty().to_text();
+        model = model.replace("output_shift 0", "output_shift 32");
 
         assert_eq!(
-            NnueScorer::from_model(model),
+            NnueScorer::from_model(&model),
             Err("output_shift must be less than 32".to_owned())
         );
     }
@@ -151,5 +331,58 @@ mod tests {
         let scorer = NnueScorer::default();
 
         assert_ne!(scorer.score(&[FeatureId(0)]), scorer.score(&[FeatureId(1)]));
+    }
+
+    #[test]
+    fn probability_is_monotonic_and_scaled() {
+        let scorer = NnueScorer::default();
+
+        assert_eq!(scorer.probability(&[]), 500_000);
+        assert!(scorer.probability(&[FeatureId(10_691)]) > scorer.probability(&[]));
+        assert!(scorer.probability(&[FeatureId(10_691)]) <= PROBABILITY_SCALE);
+    }
+
+    #[test]
+    fn deep_model_round_trips_into_runtime() {
+        let mut model = parse::DeepModel::empty();
+        model
+            .input_weights
+            .insert(10_691, vec![1; parse::DEEP_INPUTS]);
+        let scorer = NnueScorer::from_model(&model.to_text()).unwrap();
+
+        assert!(scorer.score(&[FeatureId(10_691)]) > scorer.score(&[]));
+    }
+
+    #[test]
+    fn incremental_fixture_score_matches_child_score() {
+        let scorer = NnueScorer::default();
+        let parent = [FeatureId(0), FeatureId(10), FeatureId(20_061)];
+        let child = [FeatureId(1), FeatureId(10_691), FeatureId(20_061)];
+        let accumulator = scorer.accumulator(&parent);
+
+        assert_eq!(
+            scorer.score_accumulator_delta(
+                &accumulator,
+                &[FeatureId(0), FeatureId(10)],
+                &[FeatureId(1), FeatureId(10_691)],
+            ),
+            scorer.score(&child)
+        );
+    }
+
+    #[test]
+    fn incremental_deep_score_matches_child_score() {
+        let mut model = parse::DeepModel::empty();
+        model.input_weights.insert(0, vec![1; parse::DEEP_INPUTS]);
+        model.input_weights.insert(1, vec![-1; parse::DEEP_INPUTS]);
+        let scorer = NnueScorer::from_model(&model.to_text()).unwrap();
+        let parent = [FeatureId(0)];
+        let child = [FeatureId(1)];
+        let accumulator = scorer.accumulator(&parent);
+
+        assert_eq!(
+            scorer.score_accumulator_delta(&accumulator, &[FeatureId(0)], &[FeatureId(1)]),
+            scorer.score(&child)
+        );
     }
 }
