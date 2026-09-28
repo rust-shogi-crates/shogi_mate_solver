@@ -21,6 +21,8 @@ cargo run --release -p shogi_mate_solver -- --move-ordering=nnue-model --nnue-mo
 cargo run --release -p shogi_mate_solver -- --max-positions=10000 <<<"5kgnl/9/4+B1pp1/8p/9/9/9/9/9 b 2S2rb3g2s3n3l15p 1"
 ```
 
+WASMなどのlibrary利用では、fetchしたモデルをCLIのファイルパスではなく、公開APIへ直接渡す。UTF-8のモデル文字列には`mate_solver::search_with_model`、`.nnue`のbytesには`mate_solver::search_with_model_bytes`を使う。どちらも`NnueScorer::from_model`でモデルを検証し、読み込み失敗を`Result`で返す。既存の`mate_solver::search`はデフォルトのmove orderingを使う。
+
 # to_sfen
 to_sfen problem.kif ==> KIF ファイルを sfen に出力
 - 与えられたファイルが初期局面から始まっている場合は最終局面を、そうでなければ開始局面を返す。

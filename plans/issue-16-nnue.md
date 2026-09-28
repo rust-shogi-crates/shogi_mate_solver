@@ -113,7 +113,7 @@ The remaining work starts from the merged NNUE runtime. PR 6 is the current impl
   - [x] Add a `--max-positions` limit to normal solving and benchmark runs.
   - [x] Add incremental NNUE delta evaluation after child-position evaluation is correct.
   - [x] Expose it through an explicit option first.
-  - [ ] Document model provenance, training data, feature format version, and benchmark results.
+  - [x] Expose model text/bytes loading APIs for library and WASM consumers.
   - [ ] Consider default enablement only after benchmark evidence supports it.
 - Functional test:
   - [x] Run the solver manually with and without the trained-model option on representative SFENs.
