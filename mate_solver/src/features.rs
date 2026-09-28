@@ -269,16 +269,50 @@ mod tests {
 
     #[test]
     fn direct_move_delta_matches_position_feature_delta() {
-        let position = wrapped("4k4/9/9/9/9/9/9/9/4K4 b G 1");
-        let mv = Move::Drop {
-            piece: Piece::new(PieceKind::Gold, Color::Black),
-            to: Square::SQ_5E,
-        };
+        assert_direct_delta_matches(
+            "4k4/9/9/9/9/9/9/9/4K4 b G 1",
+            Move::Drop {
+                piece: Piece::new(PieceKind::Gold, Color::Black),
+                to: Square::SQ_5E,
+            },
+            FeatureRole::Attacker,
+        );
+        assert_direct_delta_matches(
+            "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1",
+            Move::Normal {
+                from: Square::SQ_7G,
+                to: Square::SQ_7F,
+                promote: false,
+            },
+            FeatureRole::Attacker,
+        );
+        assert_direct_delta_matches(
+            "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1",
+            Move::Normal {
+                from: Square::SQ_7G,
+                to: Square::SQ_7F,
+                promote: false,
+            },
+            FeatureRole::Defender,
+        );
+        assert_direct_delta_matches(
+            "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1",
+            Move::Normal {
+                from: Square::SQ_5I,
+                to: Square::SQ_5H,
+                promote: false,
+            },
+            FeatureRole::Attacker,
+        );
+    }
+
+    fn assert_direct_delta_matches(sfen: &str, mv: Move, role: FeatureRole) {
+        let position = wrapped(sfen);
         let mut child = position.clone();
         child.make_move(mv);
 
-        let mut expected_removed = position_features(&position, FeatureRole::Attacker);
-        let mut expected_added = position_features(&child, FeatureRole::Attacker);
+        let mut expected_removed = position_features(&position, role);
+        let mut expected_added = position_features(&child, role);
         let mut common = Vec::new();
         for feature in expected_removed.clone() {
             if let Some(index) = expected_added
@@ -291,7 +325,7 @@ mod tests {
         }
         expected_removed.retain(|feature| !common.contains(feature));
 
-        let (mut removed, mut added) = position_feature_delta(&position, mv, FeatureRole::Attacker);
+        let (mut removed, mut added) = position_feature_delta(&position, mv, role);
         removed.sort_unstable();
         added.sort_unstable();
         expected_removed.sort_unstable();
