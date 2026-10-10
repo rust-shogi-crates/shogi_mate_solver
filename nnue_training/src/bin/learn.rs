@@ -9,10 +9,14 @@ use serde::{Deserialize, Serialize};
 use shogi_core::PartialPosition;
 use shogi_usi_parser::FromUsi;
 
+// Keep updates large enough to survive the integer model representation.
 const INPUT_LEARNING_RATE: f64 = 1.0;
-const HIDDEN_LEARNING_RATE: f64 = 0.01;
-const OUTPUT_LEARNING_RATE: f64 = 0.001;
-const POSITIVE_LABEL_WEIGHT: f64 = 1_000.0;
+const HIDDEN_LEARNING_RATE: f64 = 0.1;
+const OUTPUT_LEARNING_RATE: f64 = 0.1;
+// A small class-weight correction is enough; 1_000 made positive examples
+// dominate the objective and drove every exported probability to saturation.
+const POSITIVE_LABEL_WEIGHT: f64 = 2.0;
+const LOGIT_CLIP: f64 = 8.0;
 
 #[derive(Serialize, Deserialize)]
 struct TrainingExample {
@@ -132,7 +136,7 @@ fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)], epochs:
         for &feature in features {
             input_weights.entry(feature).or_insert_with(|| {
                 let mut weights = vec![0.0; DEEP_INPUTS];
-                weights[feature as usize % DEEP_INPUTS] = 1.0;
+                weights[feature as usize % DEEP_INPUTS] = 0.1;
                 weights
             });
         }
@@ -196,7 +200,9 @@ fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)], epochs:
                     .zip(&output_weights)
                     .map(|(value, weight)| value * weight)
                     .sum::<f64>();
-            let prediction = sigmoid(output / logit_scale);
+            let unclipped_logit = output / logit_scale;
+            let clipped_logit = unclipped_logit.clamp(-LOGIT_CLIP, LOGIT_CLIP);
+            let prediction = sigmoid(clipped_logit);
             let class_weight = if *label > 0.5 {
                 POSITIVE_LABEL_WEIGHT
             } else {
@@ -205,7 +211,11 @@ fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)], epochs:
             epoch_loss += class_weight
                 * (-label * prediction.max(f64::MIN_POSITIVE).ln()
                     - (1.0 - label) * (1.0 - prediction).max(f64::MIN_POSITIVE).ln());
-            let delta_output = (prediction - label) * class_weight / logit_scale;
+            let delta_output = if unclipped_logit.abs() < LOGIT_CLIP {
+                (prediction - label) * class_weight / logit_scale
+            } else {
+                0.0
+            };
 
             let output_weights_before = output_weights.clone();
             for (weight, value) in output_weights.iter_mut().zip(&a2) {
@@ -341,7 +351,9 @@ mod tests {
         train_deep_model(
             &mut model,
             &[([100].to_vec(), 1.0), ([200].to_vec(), 0.0)],
-            10,
+            // The model is exported with integer weights, so use enough steps
+            // for the separable fixture to produce a visible score gap.
+            1_000,
         );
         let scorer = NnueScorer::from_model(&model.to_text()).unwrap();
         assert_ne!(
