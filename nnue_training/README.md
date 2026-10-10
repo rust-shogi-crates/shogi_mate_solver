@@ -44,6 +44,8 @@ cargo run --release -p nnue_training --bin score -- --model nnue_training/work/n
 
 ## YaneuraOu詰将棋データセット
 
+取得から学習、test lossの確認、solverのベンチマークまでの手順は[`yaneuraou-learning.md`](yaneuraou-learning.md)にまとめてある。
+
 やねうら王公式の[詰将棋500万問](https://yaneuraou.yaneu.com/2020/12/25/christmas-present/)から`mate3.sfen`、`mate5.sfen`、`mate7.sfen`、`mate9.sfen`、`mate11.sfen`を取得し、`nnue_training/work/yaneuraou/`に置く。rawデータはrepositoryにcommitしない。元局面は配布元の詰み保証を使って`label=1`とし、派生局面だけsolverの`Value::is_mate()`で再判定する。探索期限または局面数制限に達した未解決例は出力しない。
 
 まず各手数から5万局面ずつ取り、正例だけに偏らないようにする。
