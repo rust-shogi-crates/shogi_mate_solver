@@ -1,4 +1,4 @@
-use std::{env, fs, process};
+use std::{collections::BTreeMap, env, fs, process};
 
 use mate_solver::{
     features::{FeatureRole, position_features},
@@ -41,6 +41,7 @@ fn run() -> Result<(), String> {
     let mut model_path = None;
     let mut examples_path = None;
     let mut output_path = None;
+    let mut test_examples_path = None;
     let mut limit = None;
     let mut epochs = None;
 
@@ -53,6 +54,10 @@ fn run() -> Result<(), String> {
             examples_path = Some(value.to_owned());
         } else if arg == "--examples" {
             examples_path = Some(next_arg(&mut args, "--examples")?);
+        } else if let Some(value) = arg.strip_prefix("--test-examples=") {
+            test_examples_path = Some(value.to_owned());
+        } else if arg == "--test-examples" {
+            test_examples_path = Some(next_arg(&mut args, "--test-examples")?);
         } else if let Some(value) = arg.strip_prefix("--output=") {
             output_path = Some(value.to_owned());
         } else if arg == "--output" {
@@ -82,17 +87,27 @@ fn run() -> Result<(), String> {
         fs::read_to_string(&model_path).map_err(|error| format!("read {model_path}: {error}"))?;
     let mut model = parse_deep_model(&model_text)?;
     let epochs = epochs.unwrap_or(10);
-    let mut deep_examples = Vec::new();
-    let mut example_count = 0usize;
+    let deep_examples = load_examples(&examples_path, limit)?;
+    let test_examples = test_examples_path
+        .as_deref()
+        .map(|path| load_examples(path, limit))
+        .transpose()?;
 
-    for line in fs::read_to_string(&examples_path)
-        .map_err(|error| format!("read {examples_path}: {error}"))?
+    train_deep_model(&mut model, &deep_examples, test_examples.as_deref(), epochs);
+    fs::write(&output_path, model.to_text())
+        .map_err(|error| format!("write {output_path}: {error}"))
+}
+
+fn load_examples(path: &str, limit: Option<usize>) -> Result<Vec<(Vec<u32>, f64)>, String> {
+    let mut deep_examples = Vec::new();
+    for line in fs::read_to_string(path)
+        .map_err(|error| format!("read {path}: {error}"))?
         .lines()
     {
         if line.trim().is_empty() {
             continue;
         }
-        if limit.is_some_and(|value| example_count >= value) {
+        if limit.is_some_and(|value| deep_examples.len() >= value) {
             break;
         }
         let example: TrainingExample =
@@ -109,15 +124,16 @@ fn run() -> Result<(), String> {
             features.into_iter().map(|feature| feature.0).collect(),
             f64::from(example.label),
         ));
-        example_count += 1;
     }
-
-    train_deep_model(&mut model, &deep_examples, epochs);
-    fs::write(&output_path, model.to_text())
-        .map_err(|error| format!("write {output_path}: {error}"))
+    Ok(deep_examples)
 }
 
-fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)], epochs: usize) {
+fn train_deep_model(
+    model: &mut DeepModel,
+    examples: &[(Vec<u32>, f64)],
+    test_examples: Option<&[(Vec<u32>, f64)]>,
+    epochs: usize,
+) {
     let logit_scale = f64::from(model.logit_scale);
     let mut input_weights = model
         .input_weights
@@ -169,7 +185,6 @@ fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)], epochs:
     let mut output_bias = f64::from(model.output_bias);
 
     for epoch in 1..=epochs {
-        let mut epoch_loss = 0.0;
         for (features, label) in examples {
             let mut input = vec![0.0; DEEP_INPUTS];
             for &feature in features {
@@ -208,9 +223,6 @@ fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)], epochs:
             } else {
                 1.0
             };
-            epoch_loss += class_weight
-                * (-label * prediction.max(f64::MIN_POSITIVE).ln()
-                    - (1.0 - label) * (1.0 - prediction).max(f64::MIN_POSITIVE).ln());
             let delta_output = if unclipped_logit.abs() < LOGIT_CLIP {
                 (prediction - label) * class_weight / logit_scale
             } else {
@@ -269,12 +281,23 @@ fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)], epochs:
                 }
             }
         }
-        let mean_loss = if examples.is_empty() {
-            0.0
-        } else {
-            epoch_loss / examples.len() as f64
+        let floating_model = FloatingModel {
+            input_weights: &input_weights,
+            layer1_weights: &layer1_weights,
+            layer1_bias: &layer1_bias,
+            layer2_weights: &layer2_weights,
+            layer2_bias: &layer2_bias,
+            output_weights: &output_weights,
+            output_bias,
+            logit_scale,
         };
-        println!("epoch {epoch}/{epochs}: loss={mean_loss:.6}");
+        let train_loss = floating_model.mean_loss(examples);
+        if let Some(test_examples) = test_examples {
+            let test_loss = floating_model.mean_loss(test_examples);
+            println!("epoch {epoch}/{epochs}: train_loss={train_loss:.6} test_loss={test_loss:.6}");
+        } else {
+            println!("epoch {epoch}/{epochs}: loss={train_loss:.6}");
+        }
     }
 
     model.input_weights = input_weights
@@ -287,6 +310,68 @@ fn train_deep_model(model: &mut DeepModel, examples: &[(Vec<u32>, f64)], epochs:
     model.layer2_bias = layer2_bias.into_iter().map(round_weight).collect();
     model.output_weights = output_weights.into_iter().map(round_weight).collect();
     model.output_bias = round_weight(output_bias);
+}
+
+struct FloatingModel<'a> {
+    input_weights: &'a BTreeMap<u32, Vec<f64>>,
+    layer1_weights: &'a [f64],
+    layer1_bias: &'a [f64],
+    layer2_weights: &'a [f64],
+    layer2_bias: &'a [f64],
+    output_weights: &'a [f64],
+    output_bias: f64,
+    logit_scale: f64,
+}
+
+impl FloatingModel<'_> {
+    fn mean_loss(&self, examples: &[(Vec<u32>, f64)]) -> f64 {
+        if examples.is_empty() {
+            return 0.0;
+        }
+        let total = examples
+            .iter()
+            .map(|(features, label)| {
+                let mut input = vec![0.0; DEEP_INPUTS];
+                for &feature in features {
+                    if let Some(weights) = self.input_weights.get(&feature) {
+                        for (value, weight) in input.iter_mut().zip(weights) {
+                            *value += weight;
+                        }
+                    }
+                }
+                let (_, a1) = forward_layer(
+                    &input,
+                    self.layer1_weights,
+                    self.layer1_bias,
+                    DEEP_INPUTS,
+                    DEEP_HIDDEN_1,
+                );
+                let (_, a2) = forward_layer(
+                    &a1,
+                    self.layer2_weights,
+                    self.layer2_bias,
+                    DEEP_HIDDEN_1,
+                    DEEP_HIDDEN_2,
+                );
+                let output = self.output_bias
+                    + a2.iter()
+                        .zip(self.output_weights)
+                        .map(|(value, weight)| value * weight)
+                        .sum::<f64>();
+                let prediction =
+                    sigmoid((output / self.logit_scale).clamp(-LOGIT_CLIP, LOGIT_CLIP));
+                let class_weight = if *label > 0.5 {
+                    POSITIVE_LABEL_WEIGHT
+                } else {
+                    1.0
+                };
+                class_weight
+                    * (-label * prediction.max(f64::MIN_POSITIVE).ln()
+                        - (1.0 - label) * (1.0 - prediction).max(f64::MIN_POSITIVE).ln())
+            })
+            .sum::<f64>();
+        total / examples.len() as f64
+    }
 }
 
 fn forward_layer(
@@ -351,6 +436,7 @@ mod tests {
         train_deep_model(
             &mut model,
             &[([100].to_vec(), 1.0), ([200].to_vec(), 0.0)],
+            None,
             // The model is exported with integer weights, so use enough steps
             // for the separable fixture to produce a visible score gap.
             1_000,

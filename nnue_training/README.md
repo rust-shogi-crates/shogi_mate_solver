@@ -22,6 +22,9 @@ cargo run --release -p nnue_training --bin init -- --output nnue_training/work/n
 # 学習開始モデルを入力し、学習例からランタイム形式のモデルを学習して保存する
 cargo run --release -p nnue_training --bin learn -- --model nnue_training/work/nnue-initial.nnue --examples nnue_training/work/nnue-examples.jsonl --output nnue_training/work/nnue-model.nnue
 
+# 学習例とテスト例を分け、epochごとに両方のlossを表示する
+cargo run --release -p nnue_training --bin learn -- --model nnue_training/work/nnue-initial.nnue --examples nnue_training/work/nnue-train.jsonl --test-examples nnue_training/work/nnue-test.jsonl --output nnue_training/work/nnue-model.nnue
+
 # モデルで各学習例を採点し、集計結果を標準出力に表示する
 cargo run --release -p nnue_training --bin score -- --model nnue_training/work/nnue-model.nnue --examples nnue_training/work/nnue-examples.jsonl
 
@@ -33,6 +36,7 @@ cargo run --release -p nnue_training --bin score -- --model nnue_training/work/n
 
 `learn`は学習例に記録された局面のposition featuresだけを入力にして、ラベル付き例を決定的な順序でオンラインSGDする。デフォルトのepoch数は10で、`--epochs=N`で変更できる。epochごとにweighted binary cross-entropyの平均lossを標準出力へ出す。出力にsigmoidを置いた勾配を、ReLUを挟む全ての層（入力重み、2つのhidden層、出力層）へ逆伝播し、最後に固定小数点の整数重みへ丸める。正例が少ないデータでも勾配が消えないよう、正例には固定のクラス重みを掛ける。
 `--epochs=0`は受け付けない。各epochのlossは`epoch 1/10: loss=...`の形式で標準出力へ出る。
+`--test-examples=<path>`を指定すると、そのファイルは重みを更新せず評価だけに使われ、各epochで`train_loss=... test_loss=...`を表示する。未指定時は従来どおり`loss=...`だけを表示する。`--limit=N`を指定した場合は学習例とテスト例の両方を先頭N件に制限する。
 
 `--mirror`はSFENを左右対称に変換した例を追加する。`--plies=N`は0手先からN手先まで各位置を生成し、各位置でevaluatorを再実行してmate/nomateのlabelを付け、元のID、変換方法、進めた手数を記録する。偶数のオフセットでは攻め方、奇数のオフセットでは玉方の局面を生成する。各局面の探索はデフォルトで60秒の生成期限を共有し、`--timeout-ms=<ms>`で変更できる。`--max-positions=<n>`を指定すると、探索で検査した局面数でも打ち切れる。いずれかの期限に達した場合は完了済みの部分結果を書き出す。
 
