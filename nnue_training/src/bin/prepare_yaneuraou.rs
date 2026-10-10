@@ -8,13 +8,8 @@ use std::{
 };
 
 use mate_solver::{
-    SearchConfig,
-    df_pn::search as dfpnsearch,
-    eval::{Value, search as evalsearch},
-    features::FeatureRole,
-    move_ordering::MoveOrderingOptions,
-    position_wrapper::PositionWrapper,
-    tt::{DfPnTable, EvalTable},
+    SearchConfig, df_pn::search as dfpnsearch, features::FeatureRole,
+    move_ordering::MoveOrderingOptions, position_wrapper::PositionWrapper, tt::DfPnTable,
 };
 use serde::Serialize;
 use shogi_core::{Move, PartialPosition, ToUsi};
@@ -48,7 +43,6 @@ struct SourcePosition {
 struct Limits {
     deadline: Option<Instant>,
     max_positions: Option<u64>,
-    search_plies: u32,
     positions: u64,
     reached: bool,
 }
@@ -58,14 +52,9 @@ impl Limits {
         Self {
             deadline: Some(Instant::now() + Duration::from_millis(timeout_ms)),
             max_positions,
-            search_plies: 40,
             positions: 0,
             reached: false,
         }
-    }
-
-    fn set_search_plies(&mut self, search_plies: u32) {
-        self.search_plies = search_plies;
     }
 
     fn check(&mut self) -> bool {
@@ -95,12 +84,9 @@ impl Limits {
         }
     }
 
-    fn add(&mut self, eval: &evalsearch::SearchStats, df_pn: &dfpnsearch::SearchStats) {
-        self.positions = self
-            .positions
-            .saturating_add(eval.positions_inspected)
-            .saturating_add(df_pn.positions_inspected);
-        if eval.limit_reached || df_pn.limit_reached {
+    fn add(&mut self, df_pn: &dfpnsearch::SearchStats) {
+        self.positions = self.positions.saturating_add(df_pn.positions_inspected);
+        if df_pn.limit_reached {
             self.reached = true;
         }
         self.check();
@@ -219,17 +205,12 @@ fn run() -> Result<(), String> {
         }
         let path = Path::new(&input_dir).join(file_name);
         let positions = sample_positions(&path, samples_per_file, &mut rng)?;
-        let search_plies = expected_mate_plies(file_name)
-            .map(|plies| plies.saturating_add(1))
-            .unwrap_or(40);
-        limits.set_search_plies(search_plies);
         eprintln!("{}: sampled {} positions", file_name, positions.len());
         for source in positions {
             if limits.check() {
                 break;
             }
             let mut df_pn = DfPnTable::new(1 << 18);
-            let mut eval = EvalTable::new(1 << 18);
             let mut emitted = HashSet::new();
             let position = parse_position(&source.sfen, &source.source_id)?;
             let mut current = PositionWrapper::new(position);
@@ -285,7 +266,6 @@ fn run() -> Result<(), String> {
                     1,
                     &mut limits,
                     &mut df_pn,
-                    &mut eval,
                 )?;
                 if mirror && !limits.reached {
                     emit_mirror(
@@ -299,7 +279,6 @@ fn run() -> Result<(), String> {
                         1,
                         &mut limits,
                         &mut df_pn,
-                        &mut eval,
                     )?;
                 }
             }
@@ -327,7 +306,6 @@ fn run() -> Result<(), String> {
                     ply_offset,
                     &mut limits,
                     &mut df_pn,
-                    &mut eval,
                 )?;
                 if mirror && !limits.reached {
                     emit_mirror(
@@ -341,7 +319,6 @@ fn run() -> Result<(), String> {
                         ply_offset,
                         &mut limits,
                         &mut df_pn,
-                        &mut eval,
                     )?;
                 }
             }
@@ -373,13 +350,12 @@ fn emit_position(
     ply_offset: usize,
     limits: &mut Limits,
     df_pn: &mut DfPnTable,
-    eval: &mut EvalTable,
 ) -> Result<(), String> {
     if limits.check() {
         return Ok(());
     }
     let sfen = position.inner().to_sfen_owned();
-    let Some(label) = classify(position, role, limits, df_pn, eval) else {
+    let Some(label) = classify(position, role, limits, df_pn) else {
         return Ok(());
     };
     emit_example(
@@ -500,7 +476,6 @@ fn emit_mirror(
     ply_offset: usize,
     limits: &mut Limits,
     df_pn: &mut DfPnTable,
-    eval: &mut EvalTable,
 ) -> Result<(), String> {
     let mirrored = mirror_sfen(&position.inner().to_sfen_owned())?;
     let mirrored = PositionWrapper::new(parse_position(&mirrored, source_id)?);
@@ -515,7 +490,6 @@ fn emit_mirror(
         ply_offset,
         limits,
         df_pn,
-        eval,
     )
 }
 
@@ -524,45 +498,30 @@ fn classify(
     role: FeatureRole,
     limits: &mut Limits,
     df_pn: &mut DfPnTable,
-    eval: &mut EvalTable,
 ) -> Option<bool> {
     let config = limits.config();
-    let mut eval_stats = evalsearch::SearchStats::default();
-    let mut df_pn_stats = dfpnsearch::SearchStats::default();
-    let (value, _) = match role {
-        FeatureRole::Attacker => evalsearch::alpha_beta_you_with_options_and_stats(
-            position,
-            df_pn,
-            eval,
-            Value::ZERO,
-            Value::new(limits.search_plies, 0, 0),
-            &mut BTreeSet::new(),
-            &mut evalsearch::SearchCtx::with_config(config),
-            false,
-            &mut eval_stats,
-            &mut df_pn_stats,
-            &MoveOrderingOptions::default(),
-        ),
-        FeatureRole::Defender => evalsearch::alpha_beta_me_with_options_and_stats(
-            position,
-            df_pn,
-            eval,
-            Value::ZERO,
-            Value::new(limits.search_plies, 0, 0),
-            &mut BTreeSet::new(),
-            &mut evalsearch::SearchCtx::with_config(config),
-            false,
-            &mut eval_stats,
-            &mut df_pn_stats,
-            &MoveOrderingOptions::default(),
-        ),
+    let node_kind = match role {
+        FeatureRole::Attacker => dfpnsearch::NodeKind::And,
+        FeatureRole::Defender => dfpnsearch::NodeKind::Or,
         _ => return None,
     };
-    limits.add(&eval_stats, &df_pn_stats);
+    let mut stats = dfpnsearch::SearchStats::default();
+    let result = dfpnsearch::mid_with_options_and_stats(
+        df_pn,
+        position,
+        (10, 10),
+        node_kind,
+        true,
+        &mut dfpnsearch::SearchCtx::with_config(config),
+        false,
+        &mut stats,
+        &MoveOrderingOptions::default(),
+    );
+    limits.add(&stats);
     if limits.reached {
         None
     } else {
-        Some(value.is_mate())
+        Some(result == (0, u32::MAX))
     }
 }
 
@@ -638,14 +597,6 @@ fn sample_positions(
     }
     samples.sort_by(|left, right| left.source_id.cmp(&right.source_id));
     Ok(samples)
-}
-
-fn expected_mate_plies(file_name: &str) -> Option<u32> {
-    file_name
-        .strip_prefix("mate")?
-        .strip_suffix(".sfen")?
-        .parse()
-        .ok()
 }
 
 fn parse_position(sfen: &str, source_id: &str) -> Result<PartialPosition, String> {
