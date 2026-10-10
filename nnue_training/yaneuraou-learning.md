@@ -76,6 +76,8 @@ cargo run --release -p nnue_training --bin prepare_yaneuraou -- \
 
 `--timeout-ms`または`--max-positions`に達すると、完了済みの部分結果を書き出して終了する。データ量を増やす場合は、同じseedで制限を増やすより、出力を分けて複数回生成し、重複を確認してから結合する。生成例の内容は次で確認できる。
 
+出力は生成中も一定件数ごとにflushされる。そのため`Ctrl-C`などで手動停止した場合も、最後にflushされた位置までのJSONLが残る。ただし、停止直前の未flush分は失われる。
+
 ```sh
 # 生成された例の件数と、offsetごとの件数を確認する
 wc -l nnue_training/work/yaneuraou-examples.jsonl

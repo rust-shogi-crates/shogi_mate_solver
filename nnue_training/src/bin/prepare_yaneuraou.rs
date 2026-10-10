@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeSet, HashSet},
     env, fs,
+    io::{BufWriter, Write},
     path::Path,
     process,
     time::{Duration, Instant},
@@ -26,6 +27,7 @@ const SOURCE_FILES: [&str; 5] = [
     "mate9.sfen",
     "mate11.sfen",
 ];
+const OUTPUT_FLUSH_INTERVAL: usize = 1_000;
 
 #[derive(Serialize)]
 struct TrainingExample {
@@ -206,7 +208,9 @@ fn run() -> Result<(), String> {
     let output = output.ok_or("missing --output")?;
     let mut rng = Rng::new(seed);
     let mut limits = Limits::new(timeout_ms, max_positions);
-    let mut output_text = String::new();
+    let output_file =
+        fs::File::create(&output).map_err(|error| format!("write {output}: {error}"))?;
+    let mut output_writer = BufWriter::new(output_file);
     let mut total_examples = 0usize;
 
     for file_name in SOURCE_FILES {
@@ -231,7 +235,7 @@ fn run() -> Result<(), String> {
             let mut current = PositionWrapper::new(position);
 
             emit_known_position(
-                &mut output_text,
+                &mut output_writer,
                 &mut total_examples,
                 &mut emitted,
                 &source.source_id,
@@ -242,7 +246,7 @@ fn run() -> Result<(), String> {
             )?;
             if mirror && !limits.reached {
                 emit_known_mirror(
-                    &mut output_text,
+                    &mut output_writer,
                     &mut total_examples,
                     &mut emitted,
                     &source.source_id,
@@ -271,7 +275,7 @@ fn run() -> Result<(), String> {
                 let mut child = current.clone();
                 child.make_move(mv);
                 emit_position(
-                    &mut output_text,
+                    &mut output_writer,
                     &mut total_examples,
                     &mut emitted,
                     &source.source_id,
@@ -285,7 +289,7 @@ fn run() -> Result<(), String> {
                 )?;
                 if mirror && !limits.reached {
                     emit_mirror(
-                        &mut output_text,
+                        &mut output_writer,
                         &mut total_examples,
                         &mut emitted,
                         &source.source_id,
@@ -313,7 +317,7 @@ fn run() -> Result<(), String> {
                 current.make_move(mv);
                 let role = toggled_role(role);
                 emit_position(
-                    &mut output_text,
+                    &mut output_writer,
                     &mut total_examples,
                     &mut emitted,
                     &source.source_id,
@@ -327,7 +331,7 @@ fn run() -> Result<(), String> {
                 )?;
                 if mirror && !limits.reached {
                     emit_mirror(
-                        &mut output_text,
+                        &mut output_writer,
                         &mut total_examples,
                         &mut emitted,
                         &source.source_id,
@@ -344,7 +348,9 @@ fn run() -> Result<(), String> {
         }
     }
 
-    fs::write(&output, output_text).map_err(|error| format!("write {output}: {error}"))?;
+    output_writer
+        .flush()
+        .map_err(|error| format!("write {output}: {error}"))?;
     eprintln!(
         "wrote {total_examples} examples; positions_inspected={}",
         limits.positions
@@ -357,7 +363,7 @@ fn run() -> Result<(), String> {
 
 #[allow(clippy::too_many_arguments)]
 fn emit_position(
-    output: &mut String,
+    output: &mut BufWriter<fs::File>,
     total_examples: &mut usize,
     emitted: &mut HashSet<(String, &'static str)>,
     source_id: &str,
@@ -386,13 +392,13 @@ fn emit_position(
         transform,
         ply_offset,
         label,
-    );
+    )?;
     Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
 fn emit_known_position(
-    output: &mut String,
+    output: &mut BufWriter<fs::File>,
     total_examples: &mut usize,
     emitted: &mut HashSet<(String, &'static str)>,
     source_id: &str,
@@ -412,13 +418,13 @@ fn emit_known_position(
         transform,
         ply_offset,
         true,
-    );
+    )?;
     Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
 fn emit_example(
-    output: &mut String,
+    output: &mut BufWriter<fs::File>,
     total_examples: &mut usize,
     emitted: &mut HashSet<(String, &'static str)>,
     source_id: &str,
@@ -427,13 +433,13 @@ fn emit_example(
     transform: &'static str,
     ply_offset: usize,
     label: bool,
-) {
+) -> Result<(), String> {
     let Some(role_name) = role_name(role) else {
-        return;
+        return Ok(());
     };
     let key = (sfen.to_owned(), role_name);
     if !emitted.insert(key) {
-        return;
+        return Ok(());
     }
     let id = format!("{source_id}::{transform}::ply{ply_offset}");
     let example = TrainingExample {
@@ -445,16 +451,21 @@ fn emit_example(
         transform,
         ply_offset,
     };
-    if let Ok(serialized) = serde_json::to_string(&example) {
-        output.push_str(&serialized);
-    }
-    output.push('\n');
+    let serialized = serde_json::to_string(&example).map_err(|error| error.to_string())?;
+    output
+        .write_all(serialized.as_bytes())
+        .and_then(|_| output.write_all(b"\n"))
+        .map_err(|error| error.to_string())?;
     *total_examples += 1;
+    if *total_examples % OUTPUT_FLUSH_INTERVAL == 0 {
+        output.flush().map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
 fn emit_known_mirror(
-    output: &mut String,
+    output: &mut BufWriter<fs::File>,
     total_examples: &mut usize,
     emitted: &mut HashSet<(String, &'static str)>,
     source_id: &str,
@@ -479,7 +490,7 @@ fn emit_known_mirror(
 
 #[allow(clippy::too_many_arguments)]
 fn emit_mirror(
-    output: &mut String,
+    output: &mut BufWriter<fs::File>,
     total_examples: &mut usize,
     emitted: &mut HashSet<(String, &'static str)>,
     source_id: &str,
