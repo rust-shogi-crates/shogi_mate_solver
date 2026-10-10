@@ -114,6 +114,7 @@ The remaining work starts from the merged NNUE runtime. PR 6 is the current impl
   - [x] Add incremental NNUE delta evaluation after child-position evaluation is correct.
   - [x] Expose it through an explicit option first.
   - [x] Expose model text/bytes loading APIs for library and WASM consumers.
+  - [x] Add deterministic YaneuraOu SFEN sampling and solver-labeled derived-position generation.
   - [ ] Consider default enablement only after benchmark evidence supports it.
 - Functional test:
   - [x] Run the solver manually with and without the trained-model option on representative SFENs.

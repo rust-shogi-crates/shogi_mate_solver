@@ -37,3 +37,23 @@ cargo run --release -p nnue_training --bin score -- --model nnue_training/work/n
 `--mirror`はSFENを左右対称に変換した例を追加する。`--plies=N`は0手先からN手先まで各位置を生成し、各位置でevaluatorを再実行してmate/nomateのlabelを付け、元のID、変換方法、進めた手数を記録する。偶数のオフセットでは攻め方、奇数のオフセットでは玉方の局面を生成する。各局面の探索はデフォルトで60秒の生成期限を共有し、`--timeout-ms=<ms>`で変更できる。`--max-positions=<n>`を指定すると、探索で検査した局面数でも打ち切れる。いずれかの期限に達した場合は完了済みの部分結果を書き出す。
 
 `score --output-file=<path>`は各学習例の`id`、局面、label、raw score、sigmoid probability、変換方法、ply offsetを指定したファイルへJSONLで出力する。未指定時は集計結果だけを標準出力に出す。
+
+## YaneuraOu詰将棋データセット
+
+やねうら王公式の[詰将棋500万問](https://yaneuraou.yaneu.com/2020/12/25/christmas-present/)から`mate3.sfen`、`mate5.sfen`、`mate7.sfen`、`mate9.sfen`、`mate11.sfen`を取得し、`nnue_training/work/yaneuraou/`に置く。rawデータはrepositoryにcommitしない。元局面は配布元の詰み保証を使って`label=1`とし、派生局面だけsolverの`Value::is_mate()`で再判定する。探索期限または局面数制限に達した未解決例は出力しない。
+
+まず各手数から5万局面ずつ取り、正例だけに偏らないようにする。
+
+```sh
+cargo run --release -p nnue_training --bin prepare_yaneuraou -- \
+  --input-dir nnue_training/work/yaneuraou \
+  --output nnue_training/work/yaneuraou-examples.jsonl \
+  --samples-per-file 50000 \
+  --negatives-per-position 2 \
+  --plies 3 \
+  --root-role defender \
+  --mirror \
+  --timeout-ms 60000
+```
+
+YaneuraOuの詰将棋SFENは玉方の手番から始まるため、`--root-role defender`を指定する。通常の攻め方番の局面を使う場合は`--root-role attacker`に変える。攻め方の派生には`all_checks()`、玉方の派生には合法手を使う。`--seed=<n>`でサンプリングと派生手を固定できる。`--max-positions=<n>`を併用すると、solverが調べる局面数でも全体を打ち切り、完了済みのJSONLだけを書き出す。生成したJSONLは通常の`learn`と`score`に渡せる。
