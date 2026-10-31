@@ -535,8 +535,8 @@ fn classify(
 ) -> Option<bool> {
     let config = limits.config();
     let node_kind = match role {
-        FeatureRole::Attacker => dfpnsearch::NodeKind::And,
-        FeatureRole::Defender => dfpnsearch::NodeKind::Or,
+        FeatureRole::Attacker => dfpnsearch::NodeKind::Or,
+        FeatureRole::Defender => dfpnsearch::NodeKind::And,
         _ => return None,
     };
     let mut stats = dfpnsearch::SearchStats::default();
@@ -556,7 +556,15 @@ fn classify(
     if limits.reached || search_limit_reached {
         None
     } else {
-        Some(result == (0, u32::MAX))
+        Some(
+            result
+                == match role {
+                    // DF-PN numbers are relative to the side to move.
+                    FeatureRole::Attacker => (0, u32::MAX),
+                    FeatureRole::Defender => (u32::MAX, 0),
+                    _ => unreachable!(),
+                },
+        )
     }
 }
 
@@ -728,4 +736,28 @@ fn parse_u64(value: &str, flag: &str) -> Result<u64, String> {
     value
         .parse()
         .map_err(|error| format!("invalid {flag}: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn dfpn_labels_mate_and_escape_for_each_role() {
+        for (sfen, role, expected) in [
+            ("8k/7R1/7G1/9/9/9/9/9/K8 b - 1", FeatureRole::Attacker, true),
+            ("8k/7RG/9/9/9/9/9/9/K8 w - 2", FeatureRole::Defender, true),
+            ("8k/9/9/9/9/9/9/9/K8 b - 1", FeatureRole::Attacker, false),
+            ("8k/9/9/9/9/9/9/9/K8 w - 1", FeatureRole::Defender, false),
+        ] {
+            let position =
+                PositionWrapper::new(PartialPosition::from_usi(&format!("sfen {sfen}")).unwrap());
+            let mut df_pn = DfPnTable::new(1 << 16);
+            let mut limits = Limits::new(60_000, Some(10_000));
+            assert_eq!(
+                classify(&position, role, &mut limits, &mut df_pn),
+                Some(expected),
+                "{sfen} {role:?}"
+            );
+        }
+    }
 }

@@ -113,7 +113,7 @@ pub fn order_df_pn_moves(
                 mv,
                 role,
             );
-            (primary, -score, index, mv)
+            (primary, score_order_key(score, role), index, mv)
         })
         .collect();
     ordered.sort_unstable_by_key(|&(primary, score, index, _)| (primary, score, index));
@@ -166,7 +166,7 @@ pub fn order_eval_moves_with_role(
                         mv,
                         role,
                     );
-                    (primary, -score, index, mv)
+                    (primary, score_order_key(score, role), index, mv)
                 })
                 .collect();
             ordered.sort_unstable_by_key(|&(primary, score, index, _)| (primary, score, index));
@@ -188,7 +188,7 @@ fn score_child_position(
         MoveOrderingScorer::Fixture(scorer) => {
             let mut child = position.clone();
             child.make_move(mv);
-            scorer.score(&position_features(&child, role))
+            scorer.score(&position_features(&child, role.flip()))
         }
         MoveOrderingScorer::Nnue(scorer) => {
             let (removed, added) = position_feature_delta(position, mv, role);
@@ -198,6 +198,14 @@ fn score_child_position(
                 &added,
             )
         }
+    }
+}
+
+// Scores estimate attacker success, regardless of whose turn it is.
+fn score_order_key(score: i32, role: FeatureRole) -> i64 {
+    match role {
+        FeatureRole::Attacker => -i64::from(score),
+        FeatureRole::Defender => i64::from(score),
     }
 }
 
@@ -213,6 +221,91 @@ mod tests {
     use super::*;
     use shogi_core::{Color, PartialPosition, Piece, PieceKind, Square};
     use shogi_usi_parser::FromUsi;
+
+    #[test]
+    fn trained_ordering_uses_child_role_and_parent_objective_for_both_colors() {
+        for (side, piece) in [("b", "R"), ("w", "r")] {
+            let position = PositionWrapper::new(
+                PartialPosition::from_usi(&format!(
+                    "sfen 4k4/9/9/9/4{piece}4/9/9/9/4K4 {side} - 1"
+                ))
+                .unwrap(),
+            );
+            let moves = [
+                Move::Normal {
+                    from: Square::SQ_5E,
+                    to: Square::SQ_5D,
+                    promote: false,
+                },
+                Move::Normal {
+                    from: Square::SQ_5E,
+                    to: Square::SQ_4E,
+                    promote: false,
+                },
+            ];
+            for role in [FeatureRole::Attacker, FeatureRole::Defender] {
+                let mut first_child = position.clone();
+                first_child.make_move(moves[0]);
+                let mut second_child = position.clone();
+                second_child.make_move(moves[1]);
+                let first_features = position_features(&first_child, role.flip());
+                let second_features = position_features(&second_child, role.flip());
+                let signal = first_features
+                    .iter()
+                    .find(|feature| !second_features.contains(feature))
+                    .unwrap();
+                let mut model = crate::nnue::parse::DeepModel::empty();
+                model
+                    .input_weights
+                    .insert(signal.0, vec![1; crate::nnue::parse::DEEP_INPUTS]);
+                model.input_weights.insert(
+                    match role.flip() {
+                        FeatureRole::Attacker => 0,
+                        FeatureRole::Defender => 1,
+                    },
+                    vec![2; crate::nnue::parse::DEEP_INPUTS],
+                );
+                let scorer = NnueScorer::from_model(&model.to_text()).unwrap();
+                let expected_score = scorer.score(&first_features);
+                assert!(expected_score > scorer.score(&second_features));
+                let accumulator = scorer.accumulator(&position_features(&position, role));
+                let options = MoveOrderingOptions {
+                    mode: MoveOrderingMode::NnueModel,
+                    scorer: MoveOrderingScorer::Nnue(scorer),
+                };
+                assert_eq!(
+                    score_child_position(
+                        &options.scorer,
+                        Some(&accumulator),
+                        &position,
+                        moves[0],
+                        role
+                    ),
+                    expected_score
+                );
+                let expected = match role {
+                    FeatureRole::Attacker => moves,
+                    FeatureRole::Defender => [moves[1], moves[0]],
+                };
+                let mut ordered = moves;
+                order_df_pn_moves(&mut ordered, &position, role, &options);
+                assert_eq!(ordered, expected);
+                ordered = moves;
+                order_eval_moves_with_role(
+                    &mut ordered,
+                    &position,
+                    &DfPnTable::new(16),
+                    role,
+                    &options,
+                );
+                assert_eq!(ordered, expected);
+            }
+        }
+        assert!(
+            score_order_key(i32::MIN, FeatureRole::Attacker)
+                > score_order_key(i32::MAX, FeatureRole::Attacker)
+        );
+    }
 
     #[test]
     fn current_df_pn_order_keeps_normal_moves_before_drops() {
@@ -301,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn nnue_fixture_score_breaks_ties_without_changing_primary_order() {
+    fn nnue_fixture_preserves_input_order_for_equal_child_scores() {
         let position = PositionWrapper::new(
             PartialPosition::from_usi("sfen 9/9/9/9/9/9/9/9/4P4 b GS 1").unwrap(),
         );
@@ -323,7 +416,19 @@ mod tests {
 
         order_df_pn_moves(&mut moves, &position, FeatureRole::Attacker, &options);
 
-        assert_eq!(moves, [preferred, other]);
+        let scorer = match &options.scorer {
+            MoveOrderingScorer::Nnue(scorer) => scorer,
+            _ => unreachable!(),
+        };
+        let mut first = position.clone();
+        first.make_move(preferred);
+        let mut second = position.clone();
+        second.make_move(other);
+        assert_eq!(
+            scorer.score(&position_features(&first, FeatureRole::Defender)),
+            scorer.score(&position_features(&second, FeatureRole::Defender))
+        );
+        assert_eq!(moves, [other, preferred]);
     }
 
     #[test]

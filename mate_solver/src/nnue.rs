@@ -199,8 +199,9 @@ impl NnueScorer {
 }
 
 fn score_deep_layer1(model: &parse::DeepModel, layer1: &[i64]) -> i32 {
+    let activated: Vec<_> = layer1.iter().map(|value| (*value).max(0)).collect();
     let hidden1 = dense_relu(
-        layer1,
+        &activated,
         &model.layer2_weights,
         &model.layer2_bias,
         parse::DEEP_HIDDEN_1,
@@ -274,6 +275,32 @@ fn clamp_i64_to_i32(value: i64) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deep_inference_applies_relu_before_second_layer() {
+        let mut model = parse::DeepModel::empty();
+        model.layer1_bias.fill(0);
+        model.layer1_bias[0] = -3;
+        model.layer2_weights.fill(0);
+        model.layer2_weights[0] = -2;
+        model.layer2_bias.fill(0);
+        model.layer2_bias[0] = 1;
+        model.output_weights.fill(0);
+        model.output_weights[0] = 1;
+        let mut weights = vec![0; parse::DEEP_INPUTS];
+        weights[0] = 4;
+        model.input_weights.insert(100, weights);
+        let scorer = NnueScorer::from_model(&model.to_text()).unwrap();
+
+        // ReLU(-3) = 0, so the second layer receives 0, not -3.
+        assert_eq!(scorer.score(&[]), 1);
+        assert_eq!(scorer.score(&[FeatureId(100)]), 0);
+        let accumulator = scorer.accumulator(&[FeatureId(100)]);
+        assert_eq!(
+            scorer.score_accumulator_delta(&accumulator, &[FeatureId(100)], &[]),
+            1
+        );
+    }
 
     #[test]
     fn fixture_inference_is_deterministic() {

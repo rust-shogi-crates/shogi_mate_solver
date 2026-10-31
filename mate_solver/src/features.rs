@@ -34,6 +34,13 @@ const HAND_PIECES: u32 = Hand::NUM_HAND_PIECES as u32;
 const HAND_COUNT_BUCKETS: u32 = 20;
 
 impl FeatureRole {
+    pub fn flip(self) -> Self {
+        match self {
+            Self::Attacker => Self::Defender,
+            Self::Defender => Self::Attacker,
+        }
+    }
+
     fn index(self) -> u32 {
         match self {
             FeatureRole::Attacker => 0,
@@ -83,9 +90,9 @@ pub fn position_features(position: &PositionWrapper, role: FeatureRole) -> Vec<F
 
 /// Returns the feature IDs removed from and added to `position` by `mv`.
 ///
-/// The relative king frame can change after every move because the side to
-/// move changes, so board features are compared square-by-square in O(81)
-/// rather than by searching two feature vectors against each other.
+/// `role` describes the parent side to move; the child has the opposite role.
+/// Board features are compared square-by-square in O(81), including changes
+/// to the defending king's square.
 pub fn position_feature_delta(
     position: &PositionWrapper,
     mv: Move,
@@ -102,7 +109,7 @@ pub fn position_feature_delta(
         &mut removed,
         &mut added,
         Some(role_feature(role)),
-        Some(role_feature(role)),
+        Some(role_feature(role.flip())),
     );
     push_changed(
         &mut removed,
@@ -112,7 +119,7 @@ pub fn position_feature_delta(
     );
 
     let parent_king = role.defender_color(parent_inner.side_to_move());
-    let child_king = role.defender_color(child_inner.side_to_move());
+    let child_king = role.flip().defender_color(child_inner.side_to_move());
     for square in Square::all() {
         push_changed(
             &mut removed,
@@ -302,7 +309,7 @@ mod tests {
                 to: Square::SQ_5H,
                 promote: false,
             },
-            FeatureRole::Attacker,
+            FeatureRole::Defender,
         );
     }
 
@@ -311,27 +318,20 @@ mod tests {
         let mut child = position.clone();
         child.make_move(mv);
 
-        let mut expected_removed = position_features(&position, role);
-        let mut expected_added = position_features(&child, role);
-        let mut common = Vec::new();
-        for feature in expected_removed.clone() {
-            if let Some(index) = expected_added
+        let mut actual = position_features(&position, role);
+        let (removed, added) = position_feature_delta(&position, mv, role);
+        for feature in removed {
+            let index = actual
                 .iter()
                 .position(|candidate| *candidate == feature)
-            {
-                expected_added.remove(index);
-                common.push(feature);
-            }
+                .unwrap();
+            actual.remove(index);
         }
-        expected_removed.retain(|feature| !common.contains(feature));
-
-        let (mut removed, mut added) = position_feature_delta(&position, mv, role);
-        removed.sort_unstable();
-        added.sort_unstable();
-        expected_removed.sort_unstable();
-        expected_added.sort_unstable();
-        assert_eq!(removed, expected_removed);
-        assert_eq!(added, expected_added);
+        actual.extend(added);
+        let mut expected = position_features(&child, role.flip());
+        actual.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(actual, expected);
     }
 
     #[test]
