@@ -38,7 +38,8 @@ cargo run --release -p nnue_training --bin score -- --model nnue_training/work/n
 `--epochs=0`は受け付けない。各epochのlossは`epoch 1/10: loss=...`の形式で標準出力へ出る。
 `--test-examples=<path>`を指定すると、そのファイルは重みを更新せず評価だけに使われ、各epochで`train_loss=... test_loss=...`を表示する。未指定時は従来どおり`loss=...`だけを表示する。`--limit=N`を指定した場合は学習例とテスト例の両方を先頭N件に制限する。
 
-`--mirror`はSFENを左右対称に変換した例を追加する。`--plies=N`は0手先からN手先まで各位置を生成し、各位置でevaluatorを再実行してmate/nomateのlabelを付け、元のID、変換方法、進めた手数を記録する。偶数のオフセットでは攻め方、奇数のオフセットでは玉方の局面を生成する。各局面の探索はデフォルトで60秒の生成期限を共有し、`--timeout-ms=<ms>`で変更できる。`--max-positions=<n>`を指定すると、探索で検査した局面数でも打ち切れる。いずれかの期限に達した場合は完了済みの部分結果を書き出す。
+`--mirror`はSFENを左右対称に変換した例を追加する。`--plies=N`は0手先からN手先まで各位置を生成し、各位置でevaluatorを再実行してmate/nomateのlabelを付け、元のID、変換方法、進めた手数を記録する。偶数のオフセットでは攻め方、奇数のオフセットでは玉方の局面を生成する。各局面の探索はデフォルトで60秒の生成期限を共有し、`--timeout-ms=<ms>`で変更できる。`--max-positions=<n>`を指定すると、各派生局面をDF-PNで探索する時の局面数を制限し、その局面を未解決として次へ進む。いずれかの期限に達した場合は完了済みの部分結果を書き出す。
+`prepare_yaneuraou`は約5秒ごとに、現在のファイル、処理済み元局面数、生成例数、探索局面数、経過時間を標準エラー出力へ表示する。時間制限はrawデータのサンプリング中とDF-PN探索中の両方で確認し、`--max-positions`は各DF-PN探索に対して適用する。表示する`positions_inspected`は全探索の累計値。
 
 `score --output-file=<path>`は各学習例の`id`、局面、label、raw score、sigmoid probability、変換方法、ply offsetを指定したファイルへJSONLで出力する。未指定時は集計結果だけを標準出力に出す。
 
@@ -59,7 +60,8 @@ cargo run --release -p nnue_training --bin prepare_yaneuraou -- \
   --plies 3 \
   --root-role defender \
   --mirror \
-  --timeout-ms 60000
+  --timeout-ms 60000 \
+  --max-positions 1000
 ```
 
-YaneuraOuの詰将棋SFENは玉方の手番から始まるため、`--root-role defender`を指定する。通常の攻め方番の局面を使う場合は`--root-role attacker`に変える。攻め方の派生には`all_checks()`、玉方の派生には合法手を使う。`--seed=<n>`でサンプリングと派生手を固定できる。`--max-positions=<n>`を併用すると、solverが調べる局面数でも全体を打ち切り、完了済みのJSONLだけを書き出す。生成したJSONLは通常の`learn`と`score`に渡せる。
+YaneuraOuの詰将棋SFENは玉方の手番から始まるため、`--root-role defender`を指定する。通常の攻め方番の局面を使う場合は`--root-role attacker`に変える。攻め方の派生には`all_checks()`、玉方の派生には合法手を使う。`--seed=<n>`でサンプリングと派生手を固定できる。`--max-positions=<n>`を併用すると、各派生局面のDF-PN探索をn局面で打ち切り、その例を出力せず次へ進む。生成全体の時間上限は`--timeout-ms`で指定する。生成したJSONLは通常の`learn`と`score`に渡せる。

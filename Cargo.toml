@@ -26,3 +26,6 @@ debug = false
 
 [workspace]
 members = ["mate_solver", "benchmark_harness", "nnue_training"]
+
+[patch.crates-io]
+shogi_legality_lite = { git = "https://github.com/rust-shogi-crates/shogi_legality_lite", rev = "78bdf325c25bdf89406672a280ad0c518c98bb25" }

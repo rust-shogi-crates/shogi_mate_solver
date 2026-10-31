@@ -44,7 +44,9 @@ wc -l nnue_training/work/yaneuraou/mate3.sfen \
 まず短い試行で、入力の読み込みと出力形式を確認する。
 
 ```sh
-# 各ファイルから少数だけ取り、左右反転と0〜1手先を含む例を60秒で作る
+# 各ファイルから少数だけ取り、左右反転と0〜1手先を含む例を作る
+# 各派生局面を最大1000局面まで探索する。生成全体は60秒で止まる
+# 進捗は標準エラー出力に出る
 cargo run --release -p nnue_training --bin prepare_yaneuraou -- \
   --input-dir nnue_training/work/yaneuraou \
   --output nnue_training/work/yaneuraou-examples-smoke.jsonl \
@@ -54,14 +56,15 @@ cargo run --release -p nnue_training --bin prepare_yaneuraou -- \
   --root-role defender \
   --mirror \
   --seed 20261010 \
-  --timeout-ms 60000
+  --timeout-ms 60000 \
+  --max-positions 1000
 ```
 
 本番用の例を作る。`--plies=N`はオフセット0からNまでを生成する。YaneuraOuのraw局面は玉方番なので、`--root-role defender`を使う。この場合、偶数オフセットは玉方、奇数オフセットは攻め方の局面になる。元局面のlabelは配布元の詰み保証から`1`、派生局面のlabelはsolverの`Value::is_mate()`で付ける。
 
 ```sh
 # 各ファイルから最大100万局面を取り、0〜4手先まで含む学習例を作る
-# --timeout-msはこの実行全体で共有される。必要な時間まで増やす
+# --timeout-msは実行全体、--max-positionsは各派生局面の探索に適用される
 cargo run --release -p nnue_training --bin prepare_yaneuraou -- \
   --input-dir nnue_training/work/yaneuraou \
   --output nnue_training/work/yaneuraou-examples.jsonl \
@@ -71,12 +74,15 @@ cargo run --release -p nnue_training --bin prepare_yaneuraou -- \
   --root-role defender \
   --mirror \
   --seed 20261010 \
-  --timeout-ms 3600000
+  --timeout-ms 3600000 \
+  --max-positions 26000
 ```
 
 `--timeout-ms`または`--max-positions`に達すると、完了済みの部分結果を書き出して終了する。データ量を増やす場合は、同じseedで制限を増やすより、出力を分けて複数回生成し、重複を確認してから結合する。生成例の内容は次で確認できる。
 
 出力は生成中も一定件数ごとにflushされる。そのため`Ctrl-C`などで手動停止した場合も、最後にflushされた位置までのJSONLが残る。ただし、停止直前の未flush分は失われる。
+
+生成中は約5秒ごとに、現在のファイル、処理済み元局面数、生成例数、探索局面数、経過時間を標準エラー出力へ表示する。時間制限はrawデータのサンプリング中とDF-PN探索中の両方で効く。`--max-positions`は各派生局面のDF-PN探索に適用され、上限に達した局面は未解決として出力せず次へ進む。表示される`positions_inspected`は全探索の累計値。
 
 ```sh
 # 生成された例の件数と、offsetごとの件数を確認する

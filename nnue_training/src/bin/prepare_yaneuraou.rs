@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeSet, HashSet},
     env, fs,
-    io::{BufWriter, Write},
+    io::{BufRead, BufReader, BufWriter, Write},
     path::Path,
     process,
     time::{Duration, Instant},
@@ -23,6 +23,7 @@ const SOURCE_FILES: [&str; 5] = [
     "mate11.sfen",
 ];
 const OUTPUT_FLUSH_INTERVAL: usize = 1_000;
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Serialize)]
 struct TrainingExample {
@@ -45,36 +46,40 @@ struct Limits {
     max_positions: Option<u64>,
     positions: u64,
     reached: bool,
+    started_at: Instant,
+    last_progress: Instant,
 }
 
 impl Limits {
     fn new(timeout_ms: u64, max_positions: Option<u64>) -> Self {
+        let started_at = Instant::now();
         Self {
-            deadline: Some(Instant::now() + Duration::from_millis(timeout_ms)),
+            deadline: Some(started_at + Duration::from_millis(timeout_ms)),
             max_positions,
             positions: 0,
             reached: false,
+            started_at,
+            last_progress: started_at,
         }
     }
 
-    fn check(&mut self) -> bool {
+    fn check_time(&mut self) -> bool {
         if self
             .deadline
             .is_some_and(|deadline| Instant::now() >= deadline)
         {
             self.reached = true;
         }
-        if self.max_positions.is_some_and(|max| self.positions >= max) {
-            self.reached = true;
-        }
+        self.reached
+    }
+
+    fn check(&mut self) -> bool {
+        self.check_time();
         self.reached
     }
 
     fn config(&self) -> SearchConfig {
-        let remaining = self
-            .max_positions
-            .map(|max| max.saturating_sub(self.positions));
-        match (self.deadline, remaining) {
+        match (self.deadline, self.max_positions) {
             (Some(deadline), Some(max_positions)) => {
                 SearchConfig::with_deadline_and_max_positions(deadline, max_positions)
             }
@@ -86,10 +91,38 @@ impl Limits {
 
     fn add(&mut self, df_pn: &dfpnsearch::SearchStats) {
         self.positions = self.positions.saturating_add(df_pn.positions_inspected);
-        if df_pn.limit_reached {
-            self.reached = true;
+        self.check_time();
+    }
+
+    fn report_progress(
+        &mut self,
+        file_name: &str,
+        processed: usize,
+        sampled: usize,
+        examples: usize,
+    ) {
+        let now = Instant::now();
+        if now.duration_since(self.last_progress) < PROGRESS_INTERVAL {
+            return;
         }
-        self.check();
+        self.last_progress = now;
+        eprintln!(
+            "progress: file={file_name} sources={processed}/{sampled} examples={examples} positions_inspected={} elapsed_ms={}",
+            self.positions,
+            now.duration_since(self.started_at).as_millis(),
+        );
+    }
+
+    fn report_sampling(&mut self, file_name: &str, scanned: usize) {
+        let now = Instant::now();
+        if now.duration_since(self.last_progress) < PROGRESS_INTERVAL {
+            return;
+        }
+        self.last_progress = now;
+        eprintln!(
+            "progress: file={file_name} sampling_lines={scanned} examples=0 positions_inspected=0 elapsed_ms={}",
+            now.duration_since(self.started_at).as_millis(),
+        );
     }
 }
 
@@ -204,9 +237,9 @@ fn run() -> Result<(), String> {
             break;
         }
         let path = Path::new(&input_dir).join(file_name);
-        let positions = sample_positions(&path, samples_per_file, &mut rng)?;
+        let positions = sample_positions(&path, samples_per_file, &mut rng, &mut limits)?;
         eprintln!("{}: sampled {} positions", file_name, positions.len());
-        for source in positions {
+        for (processed, source) in positions.iter().enumerate() {
             if limits.check() {
                 break;
             }
@@ -322,6 +355,7 @@ fn run() -> Result<(), String> {
                     )?;
                 }
             }
+            limits.report_progress(file_name, processed + 1, positions.len(), total_examples);
         }
     }
 
@@ -517,8 +551,9 @@ fn classify(
         &mut stats,
         &MoveOrderingOptions::default(),
     );
+    let search_limit_reached = stats.limit_reached;
     limits.add(&stats);
-    if limits.reached {
+    if limits.reached || search_limit_reached {
         None
     } else {
         Some(result == (0, u32::MAX))
@@ -569,15 +604,20 @@ fn sample_positions(
     path: &Path,
     sample_count: usize,
     rng: &mut Rng,
+    limits: &mut Limits,
 ) -> Result<Vec<SourcePosition>, String> {
     let file_name = path
         .file_stem()
         .and_then(|name| name.to_str())
         .ok_or_else(|| format!("invalid dataset filename: {}", path.display()))?;
-    let text =
-        fs::read_to_string(path).map_err(|error| format!("read {}: {error}", path.display()))?;
+    let file = fs::File::open(path).map_err(|error| format!("read {}: {error}", path.display()))?;
+    let reader = BufReader::new(file);
     let mut samples = Vec::with_capacity(sample_count);
-    for (line_number, line) in text.lines().enumerate() {
+    for (line_number, line) in reader.lines().enumerate() {
+        if limits.check_time() {
+            break;
+        }
+        let line = line.map_err(|error| format!("read {}: {error}", path.display()))?;
         let sfen = line.trim().strip_prefix("sfen ").unwrap_or(line.trim());
         if sfen.is_empty() {
             continue;
@@ -593,6 +633,9 @@ fn sample_positions(
             if index < sample_count {
                 samples[index] = candidate;
             }
+        }
+        if line_number % 100_000 == 0 {
+            limits.report_sampling(&file_name, line_number + 1);
         }
     }
     samples.sort_by(|left, right| left.source_id.cmp(&right.source_id));

@@ -238,6 +238,10 @@ pub fn mid_with_options_and_stats(
         return (u32::MAX - 1, u32::MAX - 1);
     }
     stats.positions_inspected += 1;
+    if ctx.check_limits(stats.positions_inspected) {
+        stats.limit_reached = true;
+        return (u32::MAX - 1, u32::MAX - 1);
+    }
     if ctx.seq.len() >= 50 {
         panic!();
     }
@@ -345,6 +349,9 @@ pub fn mid_with_options_and_stats(
             move_ordering,
         );
         ctx.pop();
+        if stats.limit_reached {
+            return (u32::MAX - 1, u32::MAX - 1);
+        }
     }
 }
 
@@ -540,6 +547,33 @@ mod tests {
         assert_eq!(result, (u32::MAX - 1, u32::MAX - 1));
         assert!(stats.limit_reached);
         assert_eq!(stats.positions_inspected, 0);
+    }
+
+    #[test]
+    fn position_limit_stops_before_expanding_a_slow_position() {
+        let position = PartialPosition::from_usi(
+            "sfen G1S3+R1l/3k1+N3/1+B1sp2p1/2lp2P2/p4S1Pp/1PPb5/PKN3N1P/1gg6/L1+s5L b R4Pgn3p 121",
+        )
+        .unwrap();
+        let wrapped = PositionWrapper::new(position);
+        let mut table = DfPnTable::new(1 << 12);
+        let mut stats = SearchStats::default();
+
+        let result = mid_with_options_and_stats(
+            &mut table,
+            &wrapped,
+            (10, 10),
+            NodeKind::And,
+            true,
+            &mut SearchCtx::with_config(crate::SearchConfig::with_max_positions(1)),
+            false,
+            &mut stats,
+            &MoveOrderingOptions::default(),
+        );
+
+        assert_eq!(result, (u32::MAX - 1, u32::MAX - 1));
+        assert!(stats.limit_reached);
+        assert_eq!(stats.positions_inspected, 1);
     }
 
     #[test]
