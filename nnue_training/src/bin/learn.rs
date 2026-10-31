@@ -10,9 +10,9 @@ use shogi_core::PartialPosition;
 use shogi_usi_parser::FromUsi;
 
 // Keep updates large enough to survive the integer model representation.
-const INPUT_LEARNING_RATE: f64 = 1.0;
-const HIDDEN_LEARNING_RATE: f64 = 0.1;
-const OUTPUT_LEARNING_RATE: f64 = 0.1;
+const INPUT_LEARNING_RATE: f64 = 10.0;
+const HIDDEN_LEARNING_RATE: f64 = 1.0;
+const OUTPUT_LEARNING_RATE: f64 = 1.0;
 // A small class-weight correction is enough; 1_000 made positive examples
 // dominate the objective and drove every exported probability to saturation.
 const POSITIVE_LABEL_WEIGHT: f64 = 2.0;
