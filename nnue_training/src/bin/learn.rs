@@ -500,6 +500,33 @@ mod tests {
     use mate_solver::{features::FeatureId, nnue::NnueScorer};
 
     #[test]
+    fn learns_opposite_labels_for_translated_positions() {
+        let examples: Vec<_> = [
+            ("8k/7G1/7K1/9/9/9/9/9/9 w - 1", 1.0),
+            ("9/8k/7G1/7K1/9/9/9/9/9 w - 1", 0.0),
+        ]
+        .into_iter()
+        .map(|(sfen, label)| {
+            let position = PartialPosition::from_usi(&format!("sfen {sfen}")).unwrap();
+            (
+                position_features(&PositionWrapper::new(position), FeatureRole::Defender)
+                    .into_iter()
+                    .map(|f| f.0)
+                    .collect(),
+                label,
+            )
+        })
+        .collect();
+        let mut model = DeepModel::empty();
+        train_deep_model(&mut model, &examples, None, 1500, 0.1, None).unwrap();
+        let scorer = NnueScorer::from_model(&model.to_text()).unwrap();
+        for (features, label) in examples {
+            let features: Vec<_> = features.into_iter().map(FeatureId).collect();
+            assert_eq!(scorer.score(&features) > 0, label == 1.0);
+        }
+    }
+
+    #[test]
     fn saturated_wrong_model_can_recover() {
         let mut model = DeepModel::empty();
         model.output_bias = -2000;

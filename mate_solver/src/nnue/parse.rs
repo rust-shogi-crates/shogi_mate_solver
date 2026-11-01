@@ -43,6 +43,10 @@ impl DeepModel {
 
     pub fn to_text(&self) -> String {
         let mut text = String::from("NNUE-FIXTURE 1\nhidden_units 512 32 32\n");
+        text.push_str(&format!(
+            "feature_version {}\n",
+            crate::features::FEATURE_VERSION
+        ));
         text.push_str(&format!("output_shift {}\n", self.output_shift));
         text.push_str(&format!("logit_scale {}\n", self.logit_scale));
         for (&feature, weights) in &self.input_weights {
@@ -68,6 +72,7 @@ pub fn parse_deep_model(text: &str) -> Result<DeepModel, String> {
     if lines.next() != Some("NNUE-FIXTURE 1") {
         return Err("expected NNUE-FIXTURE 1 header".to_owned());
     }
+    let mut seen_feature_version = false;
     let mut seen_units = false;
     let mut seen_shift = false;
     let mut seen_logit_scale = false;
@@ -80,6 +85,16 @@ pub fn parse_deep_model(text: &str) -> Result<DeepModel, String> {
     for line in lines {
         let mut fields = line.split_whitespace();
         match fields.next() {
+            Some("feature_version") => {
+                if seen_feature_version {
+                    return Err("duplicate feature_version".to_owned());
+                }
+                let version = parse_unsigned(&mut fields, "feature_version")?;
+                if version != crate::features::FEATURE_VERSION {
+                    return Err(format!("unsupported feature_version {version}; regenerate the initial model and retrain"));
+                }
+                seen_feature_version = true;
+            }
             Some("hidden_units") => {
                 if seen_units {
                     return Err("duplicate hidden_units".to_owned());
@@ -173,6 +188,12 @@ pub fn parse_deep_model(text: &str) -> Result<DeepModel, String> {
         || !seen_output_bias
     {
         return Err("model is missing required fields".to_owned());
+    }
+    if !seen_feature_version {
+        return Err(
+            "missing feature_version; legacy models require a new initial model and retraining"
+                .to_owned(),
+        );
     }
     Ok(model)
 }

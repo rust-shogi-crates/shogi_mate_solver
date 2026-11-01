@@ -75,3 +75,9 @@ YaneuraOuの詰将棋SFENは玉方の手番から始まるため、`--root-role 
 cargo run --release --locked -p nnue_training --bin audit_examples -- \
   nnue_training/work/examples.jsonl nnue_training/work/examples-audited.jsonl
 ```
+
+### 特徴量の互換性
+
+現在のモデルには `feature_version 2` が必須。守備側の玉の絶対位置を81マスの特徴量で表し、既存の玉からの相対座標と併用する。玉がない場合は既存の絶対座標による表現を使う。
+
+旧モデルは学習・推論とも読み込み時に拒否する。`init` で初期モデルを作り直して再学習すること。SFENを持つ既存の教師データは再利用でき、この変更のための再生成は不要。

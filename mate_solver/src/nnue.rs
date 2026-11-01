@@ -343,6 +343,25 @@ mod tests {
     }
 
     #[test]
+    fn model_rejects_incompatible_features() {
+        let text = parse::DeepModel::empty().to_text();
+        let field = format!("feature_version {}\n", crate::features::FEATURE_VERSION);
+        assert!(NnueScorer::from_model(&text.replace(&field, ""))
+            .unwrap_err()
+            .contains("missing feature_version"));
+        assert!(
+            NnueScorer::from_model(&text.replace(&field, "feature_version 1\n"))
+                .unwrap_err()
+                .contains("unsupported feature_version")
+        );
+        assert!(
+            NnueScorer::from_model(&text.replace(&field, &format!("{field}{field}")))
+                .unwrap_err()
+                .contains("duplicate feature_version")
+        );
+    }
+
+    #[test]
     fn model_rejects_unsafe_output_shift() {
         let mut model = parse::DeepModel::empty().to_text();
         model = model.replace("output_shift 0", "output_shift 32");

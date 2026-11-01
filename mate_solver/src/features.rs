@@ -1,8 +1,9 @@
 //! Deterministic sparse feature IDs for move-ordering scorers.
 //!
 //! The ID ranges are part of the feature format contract:
-//! roles start at 0, side-to-move at 10, king-relative board features at
-//! 1_000, absolute board fallback features at 10_000, and hands at 20_000.
+//! roles start at 0, side-to-move at 10, defending-king squares at 100,
+//! king-relative board features at 1_000, absolute board fallback features
+//! at 10_000, and hands at 20_000.
 //! Hand counts use one count-bucket feature per color/piece kind, capped at
 //! bucket 19 for malformed positions with unusually large hands.
 
@@ -20,6 +21,9 @@ pub enum FeatureRole {
     Defender,
 }
 
+pub const FEATURE_VERSION: u32 = 2;
+
+const KING_SQUARE_BASE: u32 = 100;
 const ROLE_BASE: u32 = 0;
 const SIDE_TO_MOVE_BASE: u32 = 10;
 const BOARD_RELATIVE_BASE: u32 = 1_000;
@@ -65,6 +69,9 @@ pub fn position_features(position: &PositionWrapper, role: FeatureRole) -> Vec<F
 
     let defender = role.defender_color(inner.side_to_move());
     let king = inner.king_position(defender);
+    if let Some(king) = king {
+        features.push(king_square_feature(king));
+    }
     for square in Square::all() {
         if let Some(piece) = inner.piece_at(square) {
             let (piece_kind, color) = piece.to_parts();
@@ -120,6 +127,16 @@ pub fn position_feature_delta(
 
     let parent_king = role.defender_color(parent_inner.side_to_move());
     let child_king = role.flip().defender_color(child_inner.side_to_move());
+    push_changed(
+        &mut removed,
+        &mut added,
+        parent_inner
+            .king_position(parent_king)
+            .map(king_square_feature),
+        child_inner
+            .king_position(child_king)
+            .map(king_square_feature),
+    );
     for square in Square::all() {
         push_changed(
             &mut removed,
@@ -174,6 +191,10 @@ fn push_changed(
             added.push(feature);
         }
     }
+}
+
+fn king_square_feature(square: Square) -> FeatureId {
+    FeatureId(KING_SQUARE_BASE + square.array_index() as u32)
 }
 
 fn role_feature(role: FeatureRole) -> FeatureId {
@@ -247,6 +268,7 @@ mod tests {
             vec![
                 FeatureId(0),
                 FeatureId(10),
+                king_square_feature(Square::SQ_5A),
                 FeatureId(7213),
                 FeatureId(3175),
                 FeatureId(20061),
@@ -313,6 +335,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn translated_positions_have_different_features() {
+        let edge = wrapped("8k/7G1/7K1/9/9/9/9/9/9 w - 1");
+        let inland = wrapped("9/8k/7G1/7K1/9/9/9/9/9 w - 1");
+        assert_ne!(
+            position_features(&edge, FeatureRole::Defender),
+            position_features(&inland, FeatureRole::Defender)
+        );
+    }
+
+    #[test]
+    fn delta_handles_white_king_and_promoting_capture() {
+        assert_direct_delta_matches(
+            "4k4/9/9/9/9/9/9/9/4K4 w - 1",
+            Move::Normal {
+                from: Square::SQ_5A,
+                to: Square::SQ_4B,
+                promote: false,
+            },
+            FeatureRole::Defender,
+        );
+        assert_direct_delta_matches(
+            "4k4/4s4/4P4/9/9/9/9/9/4K4 b - 1",
+            Move::Normal {
+                from: Square::SQ_5C,
+                to: Square::SQ_5B,
+                promote: true,
+            },
+            FeatureRole::Attacker,
+        );
+    }
+
     fn assert_direct_delta_matches(sfen: &str, mv: Move, role: FeatureRole) {
         let position = wrapped(sfen);
         let mut child = position.clone();
@@ -320,6 +374,19 @@ mod tests {
 
         let mut actual = position_features(&position, role);
         let (removed, added) = position_feature_delta(&position, mv, role);
+        // Give every relevant feature a distinct contribution so score equality
+        // also exercises king-square updates, not only feature bookkeeping.
+        let mut model = crate::nnue::parse::DeepModel::empty();
+        for feature in actual.iter().chain(added.iter()) {
+            let mut weights = vec![0; crate::nnue::parse::DEEP_INPUTS];
+            weights[0] = feature.0 as i32;
+            model.input_weights.insert(feature.0, weights);
+        }
+        let scorer = crate::nnue::NnueScorer::from_model(&model.to_text()).unwrap();
+        assert_eq!(
+            scorer.score_accumulator_delta(&scorer.accumulator(&actual), &removed, &added),
+            scorer.score(&position_features(&child, role.flip()))
+        );
         for feature in removed {
             let index = actual
                 .iter()

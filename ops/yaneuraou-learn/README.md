@@ -23,6 +23,13 @@ source_idによる80/20分割とseedは学習スクリプトと同じ。抽出se
 
 # 学習
 
+nnue_training/work/nnue-initial.nnue がない場合は新しく作る。
+```bash
+mkdir -p nnue_training/work
+cargo run --release --locked -p nnue_training --bin init -- \
+  --output nnue_training/work/nnue-initial.nnue
+```
+
 ```bash
 # 教師データと初期モデルを指定。保存先は自動で新規作成される
 bash nnue_training/train.sh "$EXAMPLES" nnue_training/work/nnue-initial.nnue
@@ -36,7 +43,7 @@ bash nnue_training/train.sh "$EXAMPLES" nnue_training/work/nnue-initial.nnue nnu
 
 # テスト
 
-モデルフォルダ内の `nnue-initial.nnue` とすべての `nnue-epoch*.nnue` を評価する。探索上限は従来どおり20000局面。releaseビルド後に順次実行し、失敗時は停止する。
+モデルフォルダ内の `nnue-initial.nnue` とすべての `nnue-epoch*.nnue` を評価する。探索上限は2000000局面。releaseビルド後に順次実行し、失敗時は停止する。
 
 ```bash
 # 学習時に表示された保存先に置き換える

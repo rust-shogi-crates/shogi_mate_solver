@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+POSITION_LIMIT=2000000
+
 if [[ "${1:-}" == --help ]]; then
   echo 'Usage: bash ops/yaneuraou-learn/benchmark.sh MODEL_DIR DATASET.jsonl OUTPUT_DIR'
-  echo 'Evaluates nnue-initial.nnue and all nnue-epoch*.nnue models, with a 20000-position limit.'
+  echo "Evaluates nnue-initial.nnue and all nnue-epoch*.nnue models, with a ${POSITION_LIMIT}-position limit."
   echo 'Existing result files in OUTPUT_DIR are overwritten.'
   exit 0
 fi
@@ -31,7 +33,7 @@ for model in "$model_dir/nnue-initial.nnue" "${epoch_models[@]}"; do
   "$root/target/release/benchmark_harness" run \
     --move-ordering=nnue-model \
     --nnue-model="$model" \
-    --max-positions=20000 \
+    --max-positions="${POSITION_LIMIT}" \
     --revision="$name" \
     "$dataset" \
     > "$output_dir/$name.jsonl" \

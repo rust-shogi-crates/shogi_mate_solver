@@ -128,13 +128,13 @@ The remaining work starts from the merged NNUE runtime. PR 6 is the current impl
 
 ## Follow-up TODOs from training and inference review
 
-### [ ] 1. Represent the defending king's absolute position
+### [x] 1. Represent the defending king's absolute position
 
 - Problem: board features contain only offsets from the defending king. Translating every piece produces identical features even when board edges change the mate result.
 - Reproduction (White defender to move): `8k/7G1/7K1/9/9/9/9/9/9 w - 1` is mate, while `9/8k/7G1/7K1/9/9/9/9/9 w - 1` is non-mate. Both received score 117 with the tested trained model.
-- [ ] Implementation: choose features that distinguish absolute king location and board-edge effects; update training, full inference, incremental evaluation, and feature/model compatibility together.
-- [ ] Functional test: train and score the two positions above, confirming that the model can learn different labels.
-- [ ] Self review: verify full and incremental feature/score equivalence after king moves, captures, drops, and promotions; reject incompatible models clearly.
+- [x] Implementation: add defending-king square features (IDs 100–180), shared by training and full/incremental inference; require `feature_version 2` and reject legacy models. Existing SFEN datasets remain reusable.
+- [x] Functional test: initialize, train, export, and score the two positions above through the release CLI; confirm opposite score signs and rejection of legacy models.
+- [x] Self review: regression tests cover full/incremental feature and score equivalence after king moves of both colors, captures, drops, and promotions, plus missing/unsupported/duplicate feature versions. All workspace release tests pass.
 
 ### [ ] 3. Evaluate NNUE ordering across existing move categories
 
