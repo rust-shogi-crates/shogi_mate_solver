@@ -1,163 +1,69 @@
 用意する物
 
 - yaneuraou データセット TODO
+- Ruby、Cargo（学習スクリプトには Bash、mkfifo、tee も必要）
 
-
-テストセット
-```bash
-ruby <<'RUBY'
-require 'json'
-require 'digest'
-
-input = 'nnue_training/work/yaneuraou-examples-regenerated.jsonl'
-output = 'nnue_training/work/compare-20261101/train-search.jsonl'
-rng = Random.new(20261101)
-samples = { 0 => [], 1 => [] }
-counts = { 0 => 0, 1 => 0 }
-last_source = nil
-is_train = false
-
-File.foreach(input) do |line|
-  next if line.strip.empty?
-  example = JSON.parse(line)
-  source = example.fetch('source_id')
-
-  if source != last_source
-    hash = Digest::SHA384.digest("20261031-source-split-v1\0#{source}")
-    is_train = hash.unpack1('Q>') % 5 != 0
-    last_source = source
-  end
-
-  next unless is_train && example.fetch('role') == 'attacker'
-
-  label = example.fetch('label')
-  counts[label] += 1
-  bucket = samples.fetch(label)
-
-  if bucket.length < 16
-    bucket << example
-  else
-    index = rng.rand(counts[label])
-    bucket[index] = example if index < 16
-  end
-end
-
-unless samples.values.all? { |bucket| bucket.length == 16 }
-  abort "抽出対象が不足しています: #{counts}"
-end
-
-File.open(output, 'w') do |file|
-  samples.values.flatten.each do |example|
-    file.puts JSON.generate(
-      id: example.fetch('id'),
-      sfen: example.fetch('sfen'),
-      expected: example.fetch('label') == 1 ? 'mate' : 'nomate'
-    )
-  end
-end
-
-puts "抽出対象: #{counts}"
-puts "32局面で上書きしました: #{File.expand_path(output)}"
-RUBY
-```
-
-repo root を CWD とする。
+以下はリポジトリのルートで実行する。実行ごとに変わるパスは、各スクリプトの引数で指定する。各スクリプトは `--help` で使い方を表示する。
 
 # テストデータ作成
 
+生成済みの教師データから、学習側の攻め方局面を詰み16件・不詰み16件、合計32件抽出する。これは学習データ上の性能評価用であり、未学習データでの評価用ではない。
+
 ```bash
+# 今回使う教師データと、抽出結果の保存先
+EXAMPLES='nnue_training/work/yaneuraou-examples-regenerated.jsonl'
+SEARCH_DATA='nnue_training/work/compare/train-search.jsonl'
+
+ruby ops/yaneuraou-learn/sample.rb "$EXAMPLES" "$SEARCH_DATA"
 ```
+
+引数は `INPUT.jsonl OUTPUT.jsonl`。出力先の親フォルダは作成する。既存の出力ファイルは上書きするが、抽出件数が不足した場合は書き換えない。
+
+source_idによる80/20分割とseedは学習スクリプトと同じ。抽出seedは20261101で固定し、同じ入力からは同じ32件を選ぶ。
 
 # 学習
+
 ```bash
-bash nnue_training/train.sh
+# 教師データと初期モデルを指定。保存先は自動で新規作成される
+bash nnue_training/train.sh "$EXAMPLES" nnue_training/work/nnue-initial.nnue
 ```
 
-Output directory: XXXX という形で dirname が出る。
+`Output directory: XXXX` と表示される。保存先を自分で指定する場合は、第3引数にまだ存在しないフォルダを渡す。
+
+```bash
+bash nnue_training/train.sh "$EXAMPLES" nnue_training/work/nnue-initial.nnue nnue_training/work/my-run
+```
 
 # テスト
 
-```bash
-# 実際の学習結果フォルダに置き換える
-RUN="./nnue_training/work/train-regenerated-20261101-113833-WZE6CO"
-
-cargo build --release --locked -p benchmark_harness
-
-mkdir -p "$RUN/benchmark"
-
-for MODEL in nnue-initial nnue-epoch03 nnue-epoch06 nnue-epoch09; do
-  ./target/release/benchmark_harness run \
-    --move-ordering=nnue-model \
-    --nnue-model="$RUN/$MODEL.nnue" \
-    --max-positions=20000 \
-    --revision="$MODEL" \
-    benchmark/issue16-ordering.jsonl \
-    > "$RUN/benchmark/$MODEL.jsonl" \
-    2> "$RUN/benchmark/$MODEL.log"
-done
-```
-
-表の作成
+モデルフォルダ内の `nnue-initial.nnue` とすべての `nnue-epoch*.nnue` を評価する。探索上限は従来どおり20000局面。releaseビルド後に順次実行し、失敗時は停止する。
 
 ```bash
-cd /Users/kobas-mac/srcview/shogi_mate_solver-worktrees/issue-16-pr7-trained-model-rollout
+# 学習時に表示された保存先に置き換える
+RUN='nnue_training/work/my-run'
 
-ruby -rjson <<'RUBY'
-dir = 'nnue_training/work/train-regenerated-20261101-113833-WZE6CO/benchmark'
-models = %w[nnue-initial nnue-epoch03 nnue-epoch06 nnue-epoch09]
+# 別系統の5局面
+bash ops/yaneuraou-learn/benchmark.sh \
+  "$RUN" benchmark/issue16-ordering.jsonl "$RUN/benchmark/external"
 
-# train-search.jsonl の結果を集計するときは '-same' に変更
-suffix = ''
-
-data = models.to_h do |model|
-  path = File.join(dir, "#{model}#{suffix}.jsonl")
-  records = File.readlines(path)
-    .reject { |line| line.strip.empty? }
-    .map { |line| JSON.parse(line) }
-
-  abort "#{path}: errorレコードがあります" if records.any? { |r| r['type'] == 'error' }
-  results = records.select { |r| r['type'] == 'result' }
-  abort "#{path}: 評価結果がありません" if results.empty?
-  [model, results]
-end
-
-puts '| 探索方式 | モデル | 正解数 | 上限到達 | 合計探索局面数 | 初期比 | 合計時間 (ms) |'
-puts '|---|---|---:|---:|---:|---:|---:|'
-
-%w[df_pn eval].each do |solver|
-  baseline_rows = data.fetch('nnue-initial')
-    .select { |r| r['evaluator'] == solver }
-  abort "#{solver}: 初期モデルの結果がありません" if baseline_rows.empty?
-  baseline = baseline_rows.sum { |r| r.fetch('positions_inspected') }
-  baseline_ids = baseline_rows.map { |r| [r['source'], r['id']] }.sort
-
-  models.each do |model|
-    rows = data.fetch(model).select { |r| r['evaluator'] == solver }
-    ids = rows.map { |r| [r['source'], r['id']] }.sort
-    abort "#{model}/#{solver}: 局面集合が一致しません" unless ids == baseline_ids
-
-    nodes = rows.sum { |r| r.fetch('positions_inspected') }
-    ratio =
-      if model == 'nnue-initial'
-        '基準'
-      elsif baseline.zero?
-        '—'
-      else
-        format('%+.1f%%', 100.0 * (nodes.to_f / baseline - 1))
-      end
-
-    puts format(
-      '| %s | %s | %d/%d | %d | %d | %s | %.2f |',
-      solver,
-      model.delete_prefix('nnue-'),
-      rows.count { |r| r['correct'] == true },
-      rows.size,
-      rows.count { |r| r['limit_reached'] },
-      nodes,
-      ratio,
-      rows.sum { |r| r.fetch('elapsed_ms') }
-    )
-  end
-end
-RUBY
+# 教師データから抽出した32局面
+bash ops/yaneuraou-learn/benchmark.sh \
+  "$RUN" "$SEARCH_DATA" "$RUN/benchmark/train"
 ```
+
+引数は `MODEL_DIR DATASET.jsonl OUTPUT_DIR`。結果は `OUTPUT_DIR/nnue-initial.jsonl`、`nnue-epoch03.jsonl` 等に、ログは同名の `.log` に保存する。同じ出力フォルダで再実行すると同名の結果・ログを上書きするため、比較条件ごとに出力フォルダを分ける。
+
+# 表の作成
+
+```bash
+ruby ops/yaneuraou-learn/table.rb "$RUN/benchmark/external"
+ruby ops/yaneuraou-learn/table.rb "$RUN/benchmark/train"
+```
+
+引数は `RESULTS_DIR`。フォルダ内の初期モデルと各epochの結果から、正解数・上限到達数・探索局面数・初期比・合計時間のMarkdown表を標準出力へ表示する。ファイルに保存する場合は次のように実行する。
+
+```bash
+ruby ops/yaneuraou-learn/table.rb "$RUN/benchmark/train" > "$RUN/benchmark/train/table.md"
+```
+
+時間は各ファイルに記録された測定値の合計。evalの時間は事前DFPNを含まず、探索局面数は含む。
