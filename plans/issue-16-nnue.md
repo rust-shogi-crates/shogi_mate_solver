@@ -126,6 +126,30 @@ The remaining work starts from the merged NNUE runtime. PR 6 is the current impl
   - Measure release binary size if the model is embedded.
   - Keep default enablement evidence-driven; do not enable by default if search work or runtime does not improve.
 
+## Follow-up TODOs from training and inference review
+
+### [ ] 1. Represent the defending king's absolute position
+
+- Problem: board features contain only offsets from the defending king. Translating every piece produces identical features even when board edges change the mate result.
+- Reproduction (White defender to move): `8k/7G1/7K1/9/9/9/9/9/9 w - 1` is mate, while `9/8k/7G1/7K1/9/9/9/9/9 w - 1` is non-mate. Both received score 117 with the tested trained model.
+- [ ] Implementation: choose features that distinguish absolute king location and board-edge effects; update training, full inference, incremental evaluation, and feature/model compatibility together.
+- [ ] Functional test: train and score the two positions above, confirming that the model can learn different labels.
+- [ ] Self review: verify full and incremental feature/score equivalence after king moves, captures, drops, and promotions; reject incompatible models clearly.
+
+### [ ] 3. Evaluate NNUE ordering across existing move categories
+
+- Problem: DF-PN sorts by the existing normal-move/drop-piece category before the NNUE score. A highly rated drop cannot precede a normal move. This is the current tie-breaking design, not a reversed-score bug.
+- [ ] Implementation: evaluate an explicit opt-in ordering that lets NNUE compare moves across categories, preserving the default ordering and attacker/defender score direction.
+- [ ] Functional test: compare correctness, search nodes, and elapsed time on fixed training-derived and unrelated positions in release mode.
+- [ ] Self review: verify deterministic ties and unchanged mate/non-mate answers; use benchmark evidence to decide whether to adopt the ordering.
+
+### [ ] 4. Give distinct generated positions distinct example IDs
+
+- Problem: `prepare_yaneuraou` builds IDs from source, transform, and ply only. Different branches at the same ply can receive the same ID. The reviewed 10,000 training and 1,000 test examples contained 23 repeated-ID occurrences with different SFENs.
+- [ ] Implementation: include deterministic branch or position identity in example IDs while preserving `source_id` for dataset splitting.
+- [ ] Functional test: generate multiple branches at the same ply and confirm distinct positions have distinct IDs and repeated runs produce stable IDs.
+- [ ] Self review: check sampling and evaluation-result matching with the new IDs; regenerate affected datasets before comparing new results.
+
 ## Cross-Cutting Rules
 
 - Use deterministic integer or fixed-point scores in sort keys unless there is a strong reason to use floats.
