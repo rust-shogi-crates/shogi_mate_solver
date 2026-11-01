@@ -34,8 +34,11 @@ cargo run --release -p nnue_training --bin score -- --model nnue_training/work/n
 
 `learn`の入力モデルは、学習開始時点の重みを指定する。`init`は学習開始用の空の仮置きモデルを作る。現在の`init`と`learn`は`512 -> 32 -> 32 -> 1`の`NNUE-FIXTURE 1`モデルを使い、solverは`mate_solver::nnue::NnueScorer::from_model`で読み込む。学習用の依存関係は独立した`nnue_training` crateに分離してあり、solverのランタイム依存関係には含まれない。
 
-`learn`は学習例に記録された局面のposition featuresだけを入力にして、ラベル付き例を決定的な順序でオンラインSGDする。デフォルトのepoch数は10で、`--epochs=N`で変更できる。epochごとにweighted binary cross-entropyの平均lossを標準出力へ出す。出力にsigmoidを置いた勾配を、ReLUを挟む全ての層（入力重み、2つのhidden層、出力層）へ逆伝播し、最後に固定小数点の整数重みへ丸める。正例が少ないデータでも勾配が消えないよう、正例には固定のクラス重みを掛ける。
-`--epochs=0`は受け付けない。各epochのlossは`epoch 1/10: loss=...`の形式で標準出力へ出る。
+`learn`は学習例に記録された局面のposition featuresだけを入力にして、ラベル付き例を固定seedでepochごとにシャッフルしてオンラインSGDする。デフォルトのepoch数は10で、`--epochs=N`で変更できる。epochごとにweighted binary cross-entropyの平均lossを標準出力へ出す。出力にsigmoidを置いた勾配を、ReLUを挟む全ての層（入力重み、2つのhidden層、出力層）へ逆伝播し、最後に固定小数点の整数重みへ丸める。正例にはクラス重み2を掛ける。lossはlogitから数値的に安定な式で計算し、飽和した誤予測にも勾配を残す。
+`--learning-rate=0.01`（デフォルト）は入力・hidden・出力の相対学習率10/1/1への共通倍率。出力biasはlogit単位で更新する。保存時は各重み行列を32倍、biasを対応する累積倍率で整数化し、`output_shift=20`でスコアのスケールを戻す。
+`--checkpoint-dir=<新しいディレクトリ>`を指定すると、浮動小数点の学習状態を維持したまま各epochの整数モデルを`epoch001.nnue`等に保存する。同名checkpointは上書きしない。表示lossは整数化前なので、実際に使うモデルは`score`と探索ベンチマークでも検証する。整数モデルからの学習再開は可能だが、整数化で失われた小数は復元できない。
+`--epochs=0`は受け付けない。
+各epochのlossは`epoch 1/10: loss=...`の形式で標準出力へ出る。
 `--test-examples=<path>`を指定すると、そのファイルは重みを更新せず評価だけに使われ、各epochで`train_loss=... test_loss=...`を表示する。未指定時は従来どおり`loss=...`だけを表示する。`--limit=N`を指定した場合は学習例とテスト例の両方を先頭N件に制限する。
 
 `--mirror`はSFENを左右対称に変換した例を追加する。`--plies=N`は0手先からN手先まで各位置を生成し、各位置でevaluatorを再実行してmate/nomateのlabelを付け、元のID、変換方法、進めた手数を記録する。偶数のオフセットでは攻め方、奇数のオフセットでは玉方の局面を生成する。各局面の探索はデフォルトで60秒の生成期限を共有し、`--timeout-ms=<ms>`で変更できる。`--max-positions=<n>`を指定すると、各派生局面をDF-PNで探索する時の局面数を制限し、その局面を未解決として次へ進む。いずれかの期限に達した場合は完了済みの部分結果を書き出す。
@@ -47,7 +50,7 @@ cargo run --release -p nnue_training --bin score -- --model nnue_training/work/n
 
 取得から学習、test lossの確認、solverのベンチマークまでの手順は[`yaneuraou-learning.md`](yaneuraou-learning.md)にまとめてある。
 
-やねうら王公式の[詰将棋500万問](https://yaneuraou.yaneu.com/2020/12/25/christmas-present/)から`mate3.sfen`、`mate5.sfen`、`mate7.sfen`、`mate9.sfen`、`mate11.sfen`を取得し、`nnue_training/work/yaneuraou/`に置く。rawデータはrepositoryにcommitしない。元局面は配布元の詰み保証を使って`label=1`とし、派生局面だけsolverの`Value::is_mate()`で再判定する。探索期限または局面数制限に達した未解決例は出力しない。
+やねうら王公式の[詰将棋500万問](https://yaneuraou.yaneu.com/2020/12/25/christmas-present/)から`mate3.sfen`、`mate5.sfen`、`mate7.sfen`、`mate9.sfen`、`mate11.sfen`を取得し、`nnue_training/work/yaneuraou/`に置く。rawデータはrepositoryにcommitしない。元局面は配布元の詰み保証を使って`label=1`とし、派生局面はDF-PNの確定した証明数で再判定する。探索期限・局面数制限・証明数のしきい値による未確定例は出力しない。
 
 まず各手数から5万局面ずつ取り、正例だけに偏らないようにする。
 
@@ -65,3 +68,10 @@ cargo run --release -p nnue_training --bin prepare_yaneuraou -- \
 ```
 
 YaneuraOuの詰将棋SFENは玉方の手番から始まるため、`--root-role defender`を指定する。通常の攻め方番の局面を使う場合は`--root-role attacker`に変える。攻め方の派生には`all_checks()`、玉方の派生には合法手を使う。`--seed=<n>`でサンプリングと派生手を固定できる。`--max-positions=<n>`を併用すると、各派生局面のDF-PN探索をn局面で打ち切り、その例を出力せず次へ進む。生成全体の時間上限は`--timeout-ms`で指定する。生成したJSONLは通常の`learn`と`score`に渡せる。
+
+既存の教師データを再検証する場合は以下を使う。入力を変更せず、DF-PNで確定した例だけを新規ファイルに保存し、修正件数と未確定件数を表示する。探索しきい値は10、各局面の上限は20000局面。未確定は不詰みを意味しない。
+
+```sh
+cargo run --release --locked -p nnue_training --bin audit_examples -- \
+  nnue_training/work/examples.jsonl nnue_training/work/examples-audited.jsonl
+```

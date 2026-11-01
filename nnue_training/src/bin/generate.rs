@@ -300,6 +300,8 @@ fn label_position(
             if stats.limit_reached || state.check_timeout() {
                 state.limit_reached = true;
                 Ok(None)
+            } else if result.0 != 0 && result.1 != 0 {
+                Ok(None)
             } else {
                 Ok(Some(
                     result
@@ -313,13 +315,12 @@ fn label_position(
             }
         }
         "eval" => {
-            // Unproven positions are intentionally labeled non-mate. Keep
-            // this bounded so generation-level timeouts remain effective.
+            // A depth-bounded miss is not a proof of non-mate.
             let config = state.search_config();
             let mut eval_stats = evalsearch::SearchStats::default();
             let mut dfpn_stats = dfpnsearch::SearchStats::default();
             let (value, _) = match role {
-                FeatureRole::Attacker => evalsearch::alpha_beta_you_with_options_and_stats(
+                FeatureRole::Attacker => evalsearch::alpha_beta_me_with_options_and_stats(
                     position,
                     df_pn,
                     eval,
@@ -332,7 +333,7 @@ fn label_position(
                     &mut dfpn_stats,
                     &MoveOrderingOptions::default(),
                 ),
-                FeatureRole::Defender => evalsearch::alpha_beta_me_with_options_and_stats(
+                FeatureRole::Defender => evalsearch::alpha_beta_you_with_options_and_stats(
                     position,
                     df_pn,
                     eval,
@@ -350,8 +351,10 @@ fn label_position(
             if eval_stats.limit_reached || dfpn_stats.limit_reached || state.check_timeout() {
                 state.limit_reached = true;
                 Ok(None)
+            } else if value.is_mate() {
+                Ok(Some(true))
             } else {
-                Ok(Some(value.is_mate()))
+                label_position(position, role, "df_pn", df_pn, eval, state)
             }
         }
         other => Err(format!("unsupported evaluator: {other}")),
@@ -466,24 +469,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dfpn_labels_mate_and_escape_for_each_role() {
-        for (sfen, role, expected) in [
-            ("8k/7R1/7G1/9/9/9/9/9/K8 b - 1", FeatureRole::Attacker, true),
-            ("8k/7RG/9/9/9/9/9/9/K8 w - 2", FeatureRole::Defender, true),
-            ("8k/9/9/9/9/9/9/9/K8 b - 1", FeatureRole::Attacker, false),
-            ("8k/9/9/9/9/9/9/9/K8 w - 1", FeatureRole::Defender, false),
-        ] {
-            let position =
-                PositionWrapper::new(PartialPosition::from_usi(&format!("sfen {sfen}")).unwrap());
-            let mut df_pn = DfPnTable::new(1 << 16);
-            let mut eval = EvalTable::new(1 << 16);
-            let mut state = GenerationState::new(60_000, Some(10_000));
-            assert_eq!(
-                label_position(&position, role, "df_pn", &mut df_pn, &mut eval, &mut state)
+    fn both_evaluators_label_mate_and_escape_for_each_role() {
+        for evaluator in ["df_pn", "eval"] {
+            for (sfen, role, expected) in [
+                ("8k/7R1/7G1/9/9/9/9/9/K8 b - 1", FeatureRole::Attacker, true),
+                ("8k/7RG/9/9/9/9/9/9/K8 w - 2", FeatureRole::Defender, true),
+                ("8k/9/9/9/9/9/9/9/K8 b - 1", FeatureRole::Attacker, false),
+                ("8k/9/9/9/9/9/9/9/K8 w - 1", FeatureRole::Defender, false),
+            ] {
+                let position = PositionWrapper::new(
+                    PartialPosition::from_usi(&format!("sfen {sfen}")).unwrap(),
+                );
+                let mut df_pn = DfPnTable::new(1 << 16);
+                let mut eval = EvalTable::new(1 << 16);
+                let mut state = GenerationState::new(60_000, Some(10_000));
+                assert_eq!(
+                    label_position(
+                        &position, role, evaluator, &mut df_pn, &mut eval, &mut state
+                    )
                     .unwrap(),
-                Some(expected),
-                "{sfen} {role:?}"
-            );
+                    Some(expected),
+                    "{evaluator} {sfen} {role:?}"
+                );
+            }
         }
     }
 

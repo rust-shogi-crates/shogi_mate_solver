@@ -231,6 +231,7 @@ fn run() -> Result<(), String> {
         fs::File::create(&output).map_err(|error| format!("write {output}: {error}"))?;
     let mut output_writer = BufWriter::new(output_file);
     let mut total_examples = 0usize;
+    let mut skipped_sources = 0usize;
 
     for file_name in SOURCE_FILES {
         if limits.check() {
@@ -245,7 +246,10 @@ fn run() -> Result<(), String> {
             }
             let mut df_pn = DfPnTable::new(1 << 18);
             let mut emitted = HashSet::new();
-            let position = parse_position(&source.sfen, &source.source_id)?;
+            let Some(position) = parse_source_position(source) else {
+                skipped_sources += 1;
+                continue;
+            };
             let mut current = PositionWrapper::new(position);
 
             emit_known_position(
@@ -363,7 +367,7 @@ fn run() -> Result<(), String> {
         .flush()
         .map_err(|error| format!("write {output}: {error}"))?;
     eprintln!(
-        "wrote {total_examples} examples; positions_inspected={}",
+        "wrote {total_examples} examples; skipped_sources={skipped_sources}; positions_inspected={}",
         limits.positions
     );
     if limits.reached {
@@ -553,7 +557,7 @@ fn classify(
     );
     let search_limit_reached = stats.limit_reached;
     limits.add(&stats);
-    if limits.reached || search_limit_reached {
+    if limits.reached || search_limit_reached || (result.0 != 0 && result.1 != 0) {
         None
     } else {
         Some(
@@ -650,6 +654,17 @@ fn sample_positions(
     Ok(samples)
 }
 
+// Malformed raw records must not discard the rest of a long generation run.
+fn parse_source_position(source: &SourcePosition) -> Option<PartialPosition> {
+    match parse_position(&source.sfen, &source.source_id) {
+        Ok(position) => Some(position),
+        Err(error) => {
+            eprintln!("warning: skipping source: {error}");
+            None
+        }
+    }
+}
+
 fn parse_position(sfen: &str, source_id: &str) -> Result<PartialPosition, String> {
     PartialPosition::from_usi(&format!("sfen {sfen}"))
         .map_err(|error| format!("invalid SFEN for {source_id}: {error:?}"))
@@ -741,6 +756,55 @@ fn parse_u64(value: &str, flag: &str) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn threshold_exit_is_not_a_negative_label() {
+        let position = PositionWrapper::new(
+            PartialPosition::from_usi(
+                "sfen ln1g2k2/2s2R3/p2ppS2p/3b5/2P2p1p1/4n4/P1NPP+l2P/1SG2G3/+r1S1K3L b GNL6Pbp 71",
+            )
+            .unwrap(),
+        );
+        let mut table = DfPnTable::new(1 << 16);
+        let mut limits = Limits::new(60_000, Some(20_000));
+        assert_eq!(
+            classify(&position, FeatureRole::Attacker, &mut limits, &mut table),
+            None
+        );
+        let mut stats = dfpnsearch::SearchStats::default();
+        let result = dfpnsearch::mid_with_options_and_stats(
+            &mut table,
+            &position,
+            (u32::MAX, u32::MAX),
+            dfpnsearch::NodeKind::Or,
+            true,
+            &mut dfpnsearch::SearchCtx::with_config(SearchConfig::with_max_positions(20_000)),
+            false,
+            &mut stats,
+            &MoveOrderingOptions::default(),
+        );
+        assert_eq!(result, (0, u32::MAX));
+    }
+
+    #[test]
+    fn malformed_source_is_skipped_without_losing_following_positions() {
+        let valid = "8k/7RG/9/9/9/9/9/9/K8 w - 2";
+        // Missing newline joins two records, including the ply and next board.
+        let sources = [
+            SourcePosition {
+                source_id: "mate3-00000001".to_owned(),
+                sfen: format!("{valid}{valid}"),
+            },
+            SourcePosition {
+                source_id: "mate3-00000002".to_owned(),
+                sfen: valid.to_owned(),
+            },
+        ];
+        assert!(parse_source_position(&sources[0]).is_none());
+        let positions: Vec<_> = sources.iter().filter_map(parse_source_position).collect();
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0], parse_position(valid, "expected").unwrap());
+    }
+
     #[test]
     fn dfpn_labels_mate_and_escape_for_each_role() {
         for (sfen, role, expected) in [

@@ -151,6 +151,8 @@ cargo run --release -p nnue_training --bin learn -- \
   --examples nnue_training/work/yaneuraou-train.jsonl \
   --test-examples nnue_training/work/yaneuraou-test.jsonl \
   --epochs 50 \
+  --learning-rate=0.01 \
+  --checkpoint-dir=nnue_training/work/checkpoints-new \
   --output nnue_training/work/yaneuraou-model.nnue
 ```
 
@@ -161,7 +163,7 @@ epoch 1/50: train_loss=... test_loss=...
 epoch 2/50: train_loss=... test_loss=...
 ```
 
-test lossが下がらず上がり続ける場合は過学習またはtrain/testの分布差が疑われる。現在の`learn`はbest checkpointの自動保存やearly stoppingをしないため、lossを見てepoch数を決め、必要なら初期モデルからepoch数を変えて再実行する。さらに学習する場合は、直前のモデルを入力にして出力を別名にする。
+test lossが下がらず上がり続ける場合は過学習またはtrain/testの分布差が疑われる。`--checkpoint-dir`には毎回新しい保存先を指定する。現在の`learn`はbest checkpointの自動選択やearly stoppingをしないため、lossを見てepoch数を決め、必要なら初期モデルからepoch数を変えて再実行する。さらに学習する場合は、直前のモデルを入力にして出力を別名にする。
 
 ```sh
 # 既存モデルから追加で20 epoch学習する
@@ -175,7 +177,7 @@ cargo run --release -p nnue_training --bin learn -- \
 
 ## 7. 各例のスコアを確認する
 
-`score`の標準出力は集計用。`--output-file`を付けると、各例のraw score、probability、labelなどをJSONLへ保存する。probabilityは`sigmoid(score)`を`0..=1_000_000`へ変換した値。
+`score`の標準出力は集計用。`--output-file`を付けると、各例のraw score、probability、labelなどをJSONLへ保存する。probabilityは`sigmoid(score / logit_scale)`を`0..=1_000_000`へ変換した値。
 
 ```sh
 # train例を集計する
