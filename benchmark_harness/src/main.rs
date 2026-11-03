@@ -161,7 +161,7 @@ fn run() -> Result<(), ()> {
 fn print_usage() {
     eprintln!("usage:");
     eprintln!(
-        "  benchmark_harness run [--strict] [--verbose] [--max-positions=<n>] [--move-ordering=current|fixture|nnue-fixture|nnue-model|nnue-model-global] [--nnue-model=<path>] [--revision=<label>] <positions.jsonl>..."
+        "  benchmark_harness run [--strict] [--verbose] [--max-positions=<n>] [--move-ordering=current|fixture|nnue-fixture|nnue-model] [--nnue-model=<path>] [--revision=<label>] <positions.jsonl>..."
     );
     eprintln!(
         "  benchmark_harness compare --base <base.jsonl> --current <current.jsonl> [--html <report.html>]"
@@ -216,7 +216,7 @@ fn run_benchmark(args: &[String]) -> Result<(), ()> {
             mode: MoveOrderingMode::NnueFixture,
             scorer: MoveOrderingScorer::Nnue(NnueScorer::default()),
         },
-        "nnue-model" | "nnue-model-global" => {
+        "nnue-model" => {
             let path = match nnue_model_path {
                 Some(path) => path,
                 None => {
@@ -239,11 +239,7 @@ fn run_benchmark(args: &[String]) -> Result<(), ()> {
                 }
             };
             MoveOrderingOptions {
-                mode: if move_ordering_mode == "nnue-model-global" {
-                    MoveOrderingMode::NnueModelGlobal
-                } else {
-                    MoveOrderingMode::NnueModel
-                },
+                mode: MoveOrderingMode::NnueModel,
                 scorer: MoveOrderingScorer::Nnue(scorer),
             }
         }

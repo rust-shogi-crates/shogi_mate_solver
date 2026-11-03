@@ -147,7 +147,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Opts, String> {
             mode: MoveOrderingMode::NnueFixture,
             scorer: MoveOrderingScorer::Nnue(NnueScorer::default()),
         },
-        "nnue-model" | "nnue-model-global" => {
+        "nnue-model" => {
             let path =
                 nnue_model_path.ok_or("--nnue-model is required with NNUE model ordering")?;
             let text = fs::read_to_string(&path)
@@ -155,11 +155,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Opts, String> {
             let scorer = NnueScorer::from_model(&text)
                 .map_err(|error| format!("parse NNUE model {path}: {error}"))?;
             MoveOrderingOptions {
-                mode: if move_ordering_mode == "nnue-model-global" {
-                    MoveOrderingMode::NnueModelGlobal
-                } else {
-                    MoveOrderingMode::NnueModel
-                },
+                mode: MoveOrderingMode::NnueModel,
                 scorer: MoveOrderingScorer::Nnue(scorer),
             }
         }

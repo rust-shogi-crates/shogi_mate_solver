@@ -80,9 +80,8 @@ pub enum MoveOrderingMode {
     Current,
     FixtureScore,
     NnueFixture,
-    NnueModel,
     /// Order DF-PN candidates solely by NNUE score, across move categories.
-    NnueModelGlobal,
+    NnueModel,
 }
 
 pub fn order_df_pn_moves(
@@ -107,7 +106,7 @@ pub fn order_df_pn_moves(
         .copied()
         .enumerate()
         .map(|(index, mv)| {
-            let primary = if options.mode == MoveOrderingMode::NnueModelGlobal {
+            let primary = if options.mode == MoveOrderingMode::NnueModel {
                 0
             } else {
                 df_pn_primary_key(mv)
@@ -147,8 +146,7 @@ pub fn order_eval_moves_with_role(
         }),
         MoveOrderingMode::FixtureScore
         | MoveOrderingMode::NnueFixture
-        | MoveOrderingMode::NnueModel
-        | MoveOrderingMode::NnueModelGlobal => {
+        | MoveOrderingMode::NnueModel => {
             let base_accumulator = match &options.scorer {
                 MoveOrderingScorer::Fixture(_) => None,
                 MoveOrderingScorer::Nnue(scorer) => {
@@ -315,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn global_nnue_orders_across_categories_for_both_colors_and_roles() {
+    fn nnue_orders_across_categories_for_both_colors_and_roles() {
         for (side, rook, hand, color) in [
             ("b", "R", "GS", Color::Black),
             ("w", "r", "gs", Color::White),
@@ -360,7 +358,7 @@ mod tests {
                     .input_weights
                     .insert(signal.0, vec![sign; crate::nnue::parse::DEEP_INPUTS]);
                 let mut options = MoveOrderingOptions {
-                    mode: MoveOrderingMode::NnueModelGlobal,
+                    mode: MoveOrderingMode::NnueModel,
                     scorer: MoveOrderingScorer::Nnue(
                         NnueScorer::from_model(&model.to_text()).unwrap(),
                     ),
@@ -368,13 +366,6 @@ mod tests {
                 let mut ordered = moves;
                 order_df_pn_moves(&mut ordered, &position, role, &options);
                 assert_eq!(ordered, [moves[1], moves[0], moves[2]]);
-                options.mode = MoveOrderingMode::NnueModel;
-                order_df_pn_moves(&mut ordered, &position, role, &options);
-                assert_eq!(
-                    ordered[0], moves[0],
-                    "existing mode retains category precedence"
-                );
-                options.mode = MoveOrderingMode::NnueModelGlobal;
                 options.scorer = MoveOrderingScorer::Nnue(
                     NnueScorer::from_model(&crate::nnue::parse::DeepModel::empty().to_text())
                         .unwrap(),

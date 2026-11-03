@@ -139,9 +139,9 @@ The remaining work starts from the merged NNUE runtime. PR 6 is the current impl
 ### [x] 3. Evaluate NNUE ordering across existing move categories
 
 - Problem: DF-PN sorts by the existing normal-move/drop-piece category before the NNUE score. A highly rated drop cannot precede a normal move. This is the current tie-breaking design, not a reversed-score bug.
-- [x] Implementation: add `nnue-model-global` to both CLIs and the library mode enum. DF-PN compares scores across categories; defaults, existing modes, and eval table priority remain unchanged.
+- [x] Implementation: use `nnue-model` for DF-PN score ordering across categories in both CLIs and the library API. Remove the separate global-mode name; defaults, fixture modes, and eval table priority remain unchanged.
 - [x] Functional test: compare two fixed models without retraining on 32 training-derived, 32 validation, and 5 external positions, with five alternating runs per mode. All answers correct, no position limits reached.
-- [x] Self review: all 60 tests pass; regressions cover cross-category ranking for both colors and roles, deterministic ties, and existing category precedence. Keep the new behavior opt-in. The user model reduced external DF-PN nodes 2309→1550 and mean time 50.679→38.571 ms; eval time 94.012→80.361 ms. Results are local under `nnue_training/work/global-order-20261103-run2/`.
+- [x] Self review: all 60 tests pass; regressions cover cross-category ranking for both colors and roles, deterministic ties, and category precedence in the current mode. Keep the new behavior opt-in. The user model reduced external DF-PN nodes 2309→1550 and mean time 50.679→38.571 ms; eval time 94.012→80.361 ms. Results are local under `nnue_training/work/global-order-20261103-run2/`.
 
 ### [ ] 4. Give distinct generated positions distinct example IDs
 

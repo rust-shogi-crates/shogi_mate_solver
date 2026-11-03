@@ -5,7 +5,7 @@ mate_solver ==> 詰将棋を解く (SFEN 文字列を標準入力から 1 行、
 -  `--stats` ==> 探索終了時に調べた局面数を標準エラーへ出力（DF-PN/eval 別の内訳も表示）。外部engine指定時は使えない
 -  `--output=json` ==> 今風に JSON で出力
 -  `--move-format=traditional|official|kif|usi|csa` ==> 手の表示方法を変える
--  `--move-ordering=current|fixture|nnue-fixture|nnue-model|nnue-model-global` ==> 手の順序付け方式を選ぶ。`nnue-model` と `nnue-model-global` では `--nnue-model=<path>` でモデルを指定する
+-  `--move-ordering=current|fixture|nnue-fixture|nnue-model` ==> 手の順序付け方式を選ぶ。`nnue-model` では `--nnue-model=<path>` でモデルを指定する
 -  `--max-positions=<n>` ==> 1問のsolver実行全体で調べる局面数の上限。上限に達して解が確定しなければエラー終了する。外部engine指定時は使えない
 -  `--sfen=<SFEN>` ==> 探索する局面を指定する。省略時は標準入力から読む
 
@@ -83,13 +83,13 @@ cargo run -p benchmark_harness -- compare --base benchmark-base.jsonl --current 
 
 ### DF-PNの分類をまたぐNNUE順序付け
 
-`--move-ordering=nnue-model-global` は、DF-PNの通常移動・駒打ち種類の優先順位を外し、子局面のNNUEスコアで候補全体を並べる。攻め方は高い順、守り方は低い順。同点は入力順を維持する。既存の `nnue-model` とデフォルトの `current` は変更しない。
+`--move-ordering=nnue-model` は、DF-PNの通常移動・駒打ち種類の優先順位を外し、子局面のNNUEスコアで候補全体を並べる。攻め方は高い順、守り方は低い順。同点は入力順を維持する。デフォルトの `current` は変更しない。
 
 最短手順探索側の置換表の優先順位は従来どおり。最短手順探索から呼ばれるDF-PNには新方式が適用される。モデル形式や重みは変わらず、再学習は不要。
 
 ```bash
 cargo run --release --locked -p benchmark_harness -- run \
-  --move-ordering=nnue-model-global \
+  --move-ordering=nnue-model \
   --nnue-model=nnue-trained.nnue \
   --max-positions=20000 benchmark/issue16-ordering.jsonl
 ```
