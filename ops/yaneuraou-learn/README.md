@@ -23,7 +23,7 @@ source_idによる80/20分割とseedは学習スクリプトと同じ。抽出se
 
 # 学習
 
-nnue_training/work/nnue-initial.nnue がない場合は新しく作る。
+`nnue_training/work/nnue-initial.nnue` がない場合、または旧特徴量版のモデルの場合は新しく作る。現在の形式は `feature_version 5`。次のコマンドは指定ファイルを上書きする。
 ```bash
 mkdir -p nnue_training/work
 cargo run --release --locked -p nnue_training --bin init -- \

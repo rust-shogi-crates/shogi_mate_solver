@@ -150,6 +150,30 @@ The remaining work starts from the merged NNUE runtime. PR 6 is the current impl
 - [ ] Functional test: generate multiple branches at the same ply and confirm distinct positions have distinct IDs and repeated runs produce stable IDs.
 - [ ] Self review: check sampling and evaluation-result matching with the new IDs; regenerate affected datasets before comparing new results.
 
+## King-neighbor feature experiment (2026-11-02)
+
+- Tested eight neighboring squares with four states each: off-board, empty, defender piece, attacker piece. Full and incremental evaluation passed regression tests.
+- Compared against feature version 2 using the same audited 10,000 training / 1,000 test examples, initial weights, and 10 epochs. Evaluated each exported model on 32 fixed search positions.
+- Final integer-model train/test loss: baseline 0.052268 / 1.334930; neighbors 0.060804 / 1.340870. All 32 search positions remained correct.
+- On five unrelated positions, final-model DF-PN nodes increased from 2286 to 2380. Comparing each variant's minimum-test-loss checkpoint reduced nodes (2394 to 2237), but neither comparison improved elapsed time. This small experiment does not establish a speed benefit.
+- Adoption deferred; normal code remains feature version 2. Reproduction commands, metrics, models, and the experimental patch are retained locally under `nnue_training/work/king-neighbors-20261102/` (ignored artifacts).
+
+## Defender HalfKP experiment (2026-11-02)
+
+- Replaced relative board features with defending-king square × non-king piece information; paired existing hand-count buckets with the king square. This single-perspective variant does not reproduce YaneuraOu's full encoding or architecture.
+- Used the same audited 10,000 training / 1,000 test examples, initialization procedure, and 10 epochs as the king-neighbor experiment. All 58 tests passed, including incremental updates of hand features when the king moves.
+- Final integer-model train/test loss: baseline 0.052268 / 1.334930; HalfKP 0.138833 / 2.185923. All epochs solved the fixed 32 search positions correctly.
+- On five unrelated positions, final-model DF-PN nodes changed from 2286 to 2253, but eval nodes increased from 8030 to 16884. HalfKP's best-test-loss checkpoint was epoch 1 (50% classification accuracy); its DF-PN/eval nodes were 1769/7762 versus the initial model's 1755/8019. No consistent benefit established.
+- Learned feature count increased from 6401 to 61238, and model text size from 7583684 to 65951437 bytes. Adoption deferred; normal code remains version 2. Patch, commands, models, and metrics are retained locally under `nnue_training/work/halfkp-20261102/` (ignored artifacts).
+
+## Color and mirror normalization experiment (2026-11-02)
+
+- [x] Implementation: feature version 5 rotates/swaps colors to a White defender and reflects the board to king files 1–5. Center-file or missing-king cases use board order to resolve mirror ties. Normalize hand colors and side-to-move, retain attacker/defender role, and sort active features.
+- [x] Functional test: same 10,000 training / 1,000 test examples and 10 epochs; verified zero symmetry-equivalent positions across splits. Final integer-model test loss improved 1.334930→0.967210 and classification accuracy 74.9%→79.1%; model text shrank 7583684→5296212 bytes.
+- [x] Self review: 59 workspace release tests passed, including rotation/color-swap and mirror invariance, missing kings, center-file tie switches, and full/incremental equivalence. Older feature versions are rejected.
+- Both variants reached minimum test loss at epoch 4 (0.776197→0.625767). On five unrelated positions, epoch-4 eval nodes fell 11335→9197 and mean time 195.646→149.350 ms across five alternating runs. Final-epoch eval was slower, so no uniform speed improvement is claimed.
+- Retain the implementation in the working tree. Existing models require reinitialization and retraining; existing SFEN teachers remain usable after checking symmetry-aware split overlap. Detailed commands, models, logs, metrics, and patch are local under `nnue_training/work/symmetry-20261102/` (ignored artifacts).
+
 ## Cross-Cutting Rules
 
 - Use deterministic integer or fixed-point scores in sort keys unless there is a strong reason to use floats.

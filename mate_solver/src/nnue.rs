@@ -349,11 +349,13 @@ mod tests {
         assert!(NnueScorer::from_model(&text.replace(&field, ""))
             .unwrap_err()
             .contains("missing feature_version"));
-        assert!(
-            NnueScorer::from_model(&text.replace(&field, "feature_version 1\n"))
-                .unwrap_err()
-                .contains("unsupported feature_version")
-        );
+        for version in 1..crate::features::FEATURE_VERSION {
+            assert!(NnueScorer::from_model(
+                &text.replace(&field, &format!("feature_version {version}\n"))
+            )
+            .unwrap_err()
+            .contains("unsupported feature_version"));
+        }
         assert!(
             NnueScorer::from_model(&text.replace(&field, &format!("{field}{field}")))
                 .unwrap_err()
