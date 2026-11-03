@@ -136,12 +136,12 @@ The remaining work starts from the merged NNUE runtime. PR 6 is the current impl
 - [x] Functional test: initialize, train, export, and score the two positions above through the release CLI; confirm opposite score signs and rejection of legacy models.
 - [x] Self review: regression tests cover full/incremental feature and score equivalence after king moves of both colors, captures, drops, and promotions, plus missing/unsupported/duplicate feature versions. All workspace release tests pass.
 
-### [ ] 3. Evaluate NNUE ordering across existing move categories
+### [x] 3. Evaluate NNUE ordering across existing move categories
 
 - Problem: DF-PN sorts by the existing normal-move/drop-piece category before the NNUE score. A highly rated drop cannot precede a normal move. This is the current tie-breaking design, not a reversed-score bug.
-- [ ] Implementation: evaluate an explicit opt-in ordering that lets NNUE compare moves across categories, preserving the default ordering and attacker/defender score direction.
-- [ ] Functional test: compare correctness, search nodes, and elapsed time on fixed training-derived and unrelated positions in release mode.
-- [ ] Self review: verify deterministic ties and unchanged mate/non-mate answers; use benchmark evidence to decide whether to adopt the ordering.
+- [x] Implementation: add `nnue-model-global` to both CLIs and the library mode enum. DF-PN compares scores across categories; defaults, existing modes, and eval table priority remain unchanged.
+- [x] Functional test: compare two fixed models without retraining on 32 training-derived, 32 validation, and 5 external positions, with five alternating runs per mode. All answers correct, no position limits reached.
+- [x] Self review: all 60 tests pass; regressions cover cross-category ranking for both colors and roles, deterministic ties, and existing category precedence. Keep the new behavior opt-in. The user model reduced external DF-PN nodes 2309→1550 and mean time 50.679→38.571 ms; eval time 94.012→80.361 ms. Results are local under `nnue_training/work/global-order-20261103-run2/`.
 
 ### [ ] 4. Give distinct generated positions distinct example IDs
 
