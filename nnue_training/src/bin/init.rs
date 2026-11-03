@@ -1,6 +1,6 @@
 use std::{env, fs, process};
 
-use mate_solver::nnue::parse::Model;
+use mate_solver::nnue::parse::DeepModel;
 
 fn main() {
     if let Err(message) = run() {
@@ -22,6 +22,6 @@ fn run() -> Result<(), String> {
         }
     }
     let output_path = output_path.ok_or("missing --output")?;
-    fs::write(&output_path, Model::empty().to_text())
+    fs::write(&output_path, DeepModel::empty().to_text())
         .map_err(|error| format!("write {output_path}: {error}"))
 }

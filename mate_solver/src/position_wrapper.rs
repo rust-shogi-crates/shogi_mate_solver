@@ -20,7 +20,42 @@ impl PositionWrapper {
 
     /// 攻め方の王手の一覧。
     pub fn all_checks(&self) -> Vec<Move> {
-        let mut moves = shogi_legality_lite::all_checks_partial(&self.inner);
+        // Build checks without all_checks_partial. Its drop-pawn legality path
+        // can recursively re-enter is_mate through all_valid_moves on large
+        // hand-heavy positions. Normal moves and checking drops can be tested
+        // independently without that recursive path.
+        let side = self.inner.side_to_move();
+        let mut moves = Vec::new();
+        for from in Square::all() {
+            if !self.inner.player_bitboard(side).contains(from) {
+                continue;
+            }
+            for to in shogi_legality_lite::normal_from_candidates(&self.inner, from) {
+                for promote in [false, true] {
+                    let mv = Move::Normal { from, to, promote };
+                    if !shogi_legality_lite::is_legal_partial_lite(&self.inner, mv) {
+                        continue;
+                    }
+                    let mut next = self.inner.clone();
+                    next.make_move(mv);
+                    if shogi_legality_lite::is_in_check_partial_lite(&next) {
+                        moves.push(mv);
+                    }
+                }
+            }
+        }
+        let hand = self.inner.hand_of_a_player(side);
+        for piece_kind in Hand::all_hand_pieces() {
+            if unsafe { hand.count(piece_kind).unwrap_unchecked() } == 0 {
+                continue;
+            }
+            for to in shogi_legality_lite::all_drop_checks_partial(&self.inner, piece_kind) {
+                moves.push(Move::Drop {
+                    piece: Piece::new(piece_kind, side),
+                    to,
+                });
+            }
+        }
         moves.sort_by_key(|mv| !mv.is_promoting()); // promoting moves come first
         moves
     }

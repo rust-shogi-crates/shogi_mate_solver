@@ -243,7 +243,11 @@ pub fn alpha_beta_me_with_options_and_stats(
     df_pn_stats: &mut crate::df_pn::search::SearchStats,
     move_ordering: &MoveOrderingOptions,
 ) -> (Value, Option<Move>) {
-    if ctx.check_limits(stats.positions_inspected) {
+    if ctx.check_limits(
+        stats
+            .positions_inspected
+            .saturating_add(df_pn_stats.positions_inspected),
+    ) {
         stats.limit_reached = true;
         return (Value::INF, None);
     }
@@ -266,7 +270,9 @@ pub fn alpha_beta_me_with_options_and_stats(
             (10, 10),
             crate::df_pn::search::NodeKind::Or,
             false,
-            &mut crate::df_pn::search::SearchCtx::with_config(ctx.config()),
+            &mut crate::df_pn::search::SearchCtx::with_config(
+                ctx.config().remaining_positions(stats.positions_inspected),
+            ),
             verbose,
             df_pn_stats,
             move_ordering,
@@ -313,7 +319,11 @@ pub fn alpha_beta_me_with_options_and_stats(
 
     let mut best = None;
     for mv in all {
-        if ctx.check_limits(stats.positions_inspected) {
+        if ctx.check_limits(
+            stats
+                .positions_inspected
+                .saturating_add(df_pn_stats.positions_inspected),
+        ) {
             stats.limit_reached = true;
             return (Value::INF, None);
         }
@@ -466,7 +476,11 @@ pub fn alpha_beta_you_with_options_and_stats(
     df_pn_stats: &mut crate::df_pn::search::SearchStats,
     move_ordering: &MoveOrderingOptions,
 ) -> (Value, Option<Move>) {
-    if ctx.check_limits(stats.positions_inspected) {
+    if ctx.check_limits(
+        stats
+            .positions_inspected
+            .saturating_add(df_pn_stats.positions_inspected),
+    ) {
         stats.limit_reached = true;
         return (Value::INF, None);
     }
@@ -529,7 +543,11 @@ pub fn alpha_beta_you_with_options_and_stats(
 
     let mut best = None;
     for &mv in &all {
-        if ctx.check_limits(stats.positions_inspected) {
+        if ctx.check_limits(
+            stats
+                .positions_inspected
+                .saturating_add(df_pn_stats.positions_inspected),
+        ) {
             stats.limit_reached = true;
             return (Value::INF, None);
         }
@@ -586,6 +604,37 @@ pub fn alpha_beta_you_with_options_and_stats(
 mod tests {
     use super::*;
     use shogi_core::{Square, ToUsi};
+
+    #[test]
+    fn position_limit_covers_eval_and_nested_df_pn_positions() {
+        use shogi_usi_parser::FromUsi;
+
+        let position = PositionWrapper::new(
+            PartialPosition::from_usi("sfen 3g1ks2/6g2/4S4/7B1/9/9/9/9/9 b G2rbg2s4n4l18p 1")
+                .unwrap(),
+        );
+        let mut df_pn = DfPnTable::new(1 << 12);
+        let mut evals = EvalTable::new(1 << 12);
+        let mut eval_stats = SearchStats::default();
+        let mut df_pn_stats = crate::df_pn::search::SearchStats::default();
+
+        alpha_beta_me_with_options_and_stats(
+            &position,
+            &mut df_pn,
+            &mut evals,
+            Value::ZERO,
+            Value::new(6, 0, 0),
+            &mut BTreeSet::new(),
+            &mut SearchCtx::with_config(crate::SearchConfig::with_max_positions(1)),
+            false,
+            &mut eval_stats,
+            &mut df_pn_stats,
+            &MoveOrderingOptions::default(),
+        );
+
+        assert!(eval_stats.limit_reached || df_pn_stats.limit_reached);
+        assert!(eval_stats.positions_inspected + df_pn_stats.positions_inspected <= 1);
+    }
 
     fn find_mate_sequence(
         df_pn: &mut DfPnTable,

@@ -81,7 +81,7 @@ The remaining work starts from the merged NNUE runtime. PR 6 is the current impl
 - Implementation:
   - [x] Add tooling to generate training examples.
   - [x] Add deterministic mirror/replay augmentation with source, transform, and ply metadata.
-  - [x] Define labels per candidate by whether its child position is proven to lead to mate under the selected evaluator; do not use the root-selected move as a proxy.
+  - [x] Define one mate/nomate label per generated position under the selected evaluator; do not include a candidate move in the training example.
   - [x] Add a configurable generation timeout that writes partial output instead of running indefinitely.
   - [x] Add learning tooling for the versioned runtime weight format.
   - [x] Require `learn` to take an initial model and add `init` for creating a placeholder model.
@@ -103,19 +103,76 @@ The remaining work starts from the merged NNUE runtime. PR 6 is the current impl
 - Suggested branch: `codex/issue-16-trained-model-rollout`.
 - Purpose: connect a real trained model to the solver in an evidence-driven way.
 - Implementation:
-  - [ ] Add or reference a real trained model.
-  - [ ] Expose it through an explicit option first.
-  - [ ] Document model provenance, training data, feature format version, and benchmark results.
+  - [ ] Add or reference a real trained model using the multi-layer format.
+  - [x] Extend runtime inference from the two-unit fixture to `512 -> 32 -> 32 -> 1`.
+  - [x] Extend model parsing and learning/export for the multi-layer format.
+  - [x] Expose the model's raw logit and a fixed-point sigmoid probability separately.
+  - [x] Emit the probability with per-example scores and document its calibration limits.
+  - [x] Define and apply an explicit logit scale so small raw scores do not saturate probability output.
+  - [x] Evaluate post-move child positions with NNUE position features only.
+  - [x] Add a `--max-positions` limit to normal solving and benchmark runs.
+  - [x] Add incremental NNUE delta evaluation after child-position evaluation is correct.
+  - [x] Expose it through an explicit option first.
+  - [x] Expose model text/bytes loading APIs for library and WASM consumers.
+  - [x] Add deterministic YaneuraOu SFEN sampling and solver-labeled derived-position generation.
   - [ ] Consider default enablement only after benchmark evidence supports it.
 - Functional test:
-  - Run the solver manually with and without the trained-model option on representative SFENs.
-  - Inspect answers, runtime summaries, and search summaries.
-  - Confirm failures are clear when the model artifact is unavailable or incompatible.
+  - [x] Run the solver manually with and without the trained-model option on representative SFENs.
+  - [x] Inspect answers, runtime summaries, and search summaries.
+  - [x] Confirm failures are clear when the model artifact is unavailable or incompatible.
 - Self review:
-  - Run full automated correctness tests.
-  - Compare release benchmarks against the previous default.
+  - [x] Run full automated correctness tests.
+  - [x] Compare release benchmarks against the previous default.
   - Measure release binary size if the model is embedded.
   - Keep default enablement evidence-driven; do not enable by default if search work or runtime does not improve.
+
+## Follow-up TODOs from training and inference review
+
+### [x] 1. Represent the defending king's absolute position
+
+- Problem: board features contain only offsets from the defending king. Translating every piece produces identical features even when board edges change the mate result.
+- Reproduction (White defender to move): `8k/7G1/7K1/9/9/9/9/9/9 w - 1` is mate, while `9/8k/7G1/7K1/9/9/9/9/9 w - 1` is non-mate. Both received score 117 with the tested trained model.
+- [x] Implementation: add defending-king square features (IDs 100–180), shared by training and full/incremental inference; require `feature_version 2` and reject legacy models. Existing SFEN datasets remain reusable.
+- [x] Functional test: initialize, train, export, and score the two positions above through the release CLI; confirm opposite score signs and rejection of legacy models.
+- [x] Self review: regression tests cover full/incremental feature and score equivalence after king moves of both colors, captures, drops, and promotions, plus missing/unsupported/duplicate feature versions. All workspace release tests pass.
+
+### [x] 3. Evaluate NNUE ordering across existing move categories
+
+- Problem: DF-PN sorts by the existing normal-move/drop-piece category before the NNUE score. A highly rated drop cannot precede a normal move. This is the current tie-breaking design, not a reversed-score bug.
+- [x] Implementation: use `nnue-model` for DF-PN score ordering across categories in both CLIs and the library API. Remove the separate global-mode name; defaults, fixture modes, and eval table priority remain unchanged.
+- [x] Functional test: compare two fixed models without retraining on 32 training-derived, 32 validation, and 5 external positions, with five alternating runs per mode. All answers correct, no position limits reached.
+- [x] Self review: all 60 tests pass; regressions cover cross-category ranking for both colors and roles, deterministic ties, and category precedence in the current mode. Keep the new behavior opt-in. The user model reduced external DF-PN nodes 2309→1550 and mean time 50.679→38.571 ms; eval time 94.012→80.361 ms. Results are local under `nnue_training/work/global-order-20261103-run2/`.
+
+### [ ] 4. Give distinct generated positions distinct example IDs
+
+- Problem: `prepare_yaneuraou` builds IDs from source, transform, and ply only. Different branches at the same ply can receive the same ID. The reviewed 10,000 training and 1,000 test examples contained 23 repeated-ID occurrences with different SFENs.
+- [ ] Implementation: include deterministic branch or position identity in example IDs while preserving `source_id` for dataset splitting.
+- [ ] Functional test: generate multiple branches at the same ply and confirm distinct positions have distinct IDs and repeated runs produce stable IDs.
+- [ ] Self review: check sampling and evaluation-result matching with the new IDs; regenerate affected datasets before comparing new results.
+
+## King-neighbor feature experiment (2026-11-02)
+
+- Tested eight neighboring squares with four states each: off-board, empty, defender piece, attacker piece. Full and incremental evaluation passed regression tests.
+- Compared against feature version 2 using the same audited 10,000 training / 1,000 test examples, initial weights, and 10 epochs. Evaluated each exported model on 32 fixed search positions.
+- Final integer-model train/test loss: baseline 0.052268 / 1.334930; neighbors 0.060804 / 1.340870. All 32 search positions remained correct.
+- On five unrelated positions, final-model DF-PN nodes increased from 2286 to 2380. Comparing each variant's minimum-test-loss checkpoint reduced nodes (2394 to 2237), but neither comparison improved elapsed time. This small experiment does not establish a speed benefit.
+- Adoption deferred; normal code remains feature version 2. Reproduction commands, metrics, models, and the experimental patch are retained locally under `nnue_training/work/king-neighbors-20261102/` (ignored artifacts).
+
+## Defender HalfKP experiment (2026-11-02)
+
+- Replaced relative board features with defending-king square × non-king piece information; paired existing hand-count buckets with the king square. This single-perspective variant does not reproduce YaneuraOu's full encoding or architecture.
+- Used the same audited 10,000 training / 1,000 test examples, initialization procedure, and 10 epochs as the king-neighbor experiment. All 58 tests passed, including incremental updates of hand features when the king moves.
+- Final integer-model train/test loss: baseline 0.052268 / 1.334930; HalfKP 0.138833 / 2.185923. All epochs solved the fixed 32 search positions correctly.
+- On five unrelated positions, final-model DF-PN nodes changed from 2286 to 2253, but eval nodes increased from 8030 to 16884. HalfKP's best-test-loss checkpoint was epoch 1 (50% classification accuracy); its DF-PN/eval nodes were 1769/7762 versus the initial model's 1755/8019. No consistent benefit established.
+- Learned feature count increased from 6401 to 61238, and model text size from 7583684 to 65951437 bytes. Adoption deferred; normal code remains version 2. Patch, commands, models, and metrics are retained locally under `nnue_training/work/halfkp-20261102/` (ignored artifacts).
+
+## Color and mirror normalization experiment (2026-11-02)
+
+- [x] Implementation: feature version 5 rotates/swaps colors to a White defender and reflects the board to king files 1–5. Center-file or missing-king cases use board order to resolve mirror ties. Normalize hand colors and side-to-move, retain attacker/defender role, and sort active features.
+- [x] Functional test: same 10,000 training / 1,000 test examples and 10 epochs; verified zero symmetry-equivalent positions across splits. Final integer-model test loss improved 1.334930→0.967210 and classification accuracy 74.9%→79.1%; model text shrank 7583684→5296212 bytes.
+- [x] Self review: 59 workspace release tests passed, including rotation/color-swap and mirror invariance, missing kings, center-file tie switches, and full/incremental equivalence. Older feature versions are rejected.
+- Both variants reached minimum test loss at epoch 4 (0.776197→0.625767). On five unrelated positions, epoch-4 eval nodes fell 11335→9197 and mean time 195.646→149.350 ms across five alternating runs. Final-epoch eval was slower, so no uniform speed improvement is claimed.
+- Retain the implementation in the working tree. Existing models require reinitialization and retraining; existing SFEN teachers remain usable after checking symmetry-aware split overlap. Detailed commands, models, logs, metrics, and patch are local under `nnue_training/work/symmetry-20261102/` (ignored artifacts).
 
 ## Cross-Cutting Rules
 
